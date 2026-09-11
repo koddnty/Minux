@@ -5,6 +5,7 @@ mov es, ax
 call Disp
 jmp $
 Disp:
+
     mov ax, BootMsg
     mov bp, ax
     mov cx, 16
