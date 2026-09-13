@@ -2,7 +2,15 @@ DA_32 EQU 4000h         ; 32位代码段属性
 DA_C EQU 98h            ; 只执行代码段属性
 DA_DRW EQU 92h          ; 可读写数据段属性
 DA_DRWA EQU 93h          ; 存在的已访问的可读写数据段属性
+DA_LDT EQU 82h          ; LDT段属性
 
+
+DA_DPL_0 EQU 00h         ; DPL=0
+DA_DPL_1 EQU 20h         ; DPL=1
+DA_DPL_2 EQU 40h         ; DPL=2
+DA_DPL_3 EQU 60h         ; DPL=3
+
+SA_TIL EQU 4h           ; LDT选择子中的TI位
 
 %macro Descriptor 3
     dw %2 & 0xFFFF      ; 段界限 15:0
@@ -68,6 +76,27 @@ PM_BEGIN:
     mov byte [PM_DESC_STACK32 + 4], al
     mov byte [PM_DESC_STACK32 + 7], ah
 
+
+    ; 初始化32位LDT
+    xor eax, eax
+    mov ax, cs
+    shl eax, 4
+    add eax, LABEL_LDT
+    mov word [LABEL_DESC_LDT + 2], ax
+    shl eax, 16
+    mov byte [LABEL_DESC_LDT + 4], al
+    mov byte [LABEL_DESC_LDT + 7], ah
+    ; LDT
+    xor eax, eax
+    mov ax, cs
+    shl eax, 4
+    add eax, LABEL_CODEA
+    mov word [LABEL_LDT_DESC_CODEA + 2], ax
+    shl eax, 16
+    mov byte [LABEL_LDT_DESC_CODEA + 4], al
+    mov byte [LABEL_LDT_DESC_CODEA + 7], ah
+
+
     ; 加载GDTR
     xor eax, eax
     mov ax, ds
@@ -105,6 +134,8 @@ PM_DESC_DATA32:     Descriptor  0,          DATALen - 1,        DA_DRW
 PM_DESC_STACK32:    Descriptor  0,          TopOfStack - 1,     DA_DRW + DA_32
 PM_DESC_TEST:       Descriptor  0200000h,   0ffffh,             DA_DRW
 PM_DESC_VIDEO:      Descriptor  0B8000h,    0ffffh,             DA_DRW
+
+LABEL_DESC_LDT:     Descriptor  0,          LDTLen - 1,         DA_LDT
 ; end of defination gdt
 GdtLen equ $ - PM_GDT
 GdtPtr dw GdtLen - 1
@@ -116,6 +147,8 @@ SelectorData32  equ PM_DESC_DATA32  - PM_GDT
 SelectorStack32 equ PM_DESC_STACK32 - PM_GDT
 SelectorTest    equ PM_DESC_TEST    - PM_GDT
 SelectorVideo   equ PM_DESC_VIDEO   - PM_GDT
+
+SelectorLDT     equ LABEL_DESC_LDT  - PM_GDT
 ; end of [SECTION .gdt]
 
 
@@ -138,8 +171,6 @@ PM_STACK:
 TopOfStack equ $ - PM_STACK - 1
 ; End of stack  
  
-
-
 
 
 [SECTION .s32]
@@ -166,18 +197,20 @@ PM_SEG_CODE32:
     mov esp, TopOfStack
 
 
-    xor esi, esi
-    xor edi, edi
-    mov esi, OffsetPMMessage
-    mov edi, (80 * 10 + 0) * 2
-    cld
 
+    ; 打印6
     mov ax, SelectorVideo
     mov gs, ax
     mov byte [gs:0x00], '6'
     mov byte [gs:0x01], 0xA4
 
-    mov ah, 0cH                 ; 必须放在 mov ax, SelectorVideo 之后，否则 AH 被清零
+
+    xor esi, esi
+    xor edi, edi
+    mov esi, OffsetPMMessage
+    mov edi, (80 * 10 + 0) * 2
+    cld
+    mov ah, 0cH
 
 .1:
     lodsb
@@ -188,6 +221,39 @@ PM_SEG_CODE32:
     jmp .1
 
 .2:     ; 显示完毕
-    jmp $
+    mov ax, SelectorLDT
+    lldt ax 
+    jmp SelectorLDTCodeA:0
     
 SegCode32Len equ $ - PM_SEG_CODE32
+
+
+
+
+
+
+
+; LDT
+[SECTION .ldt]
+ALIGN 32
+LABEL_LDT:
+    LABEL_LDT_DESC_CODEA: Descriptor        0, CodeALen - 1, DA_C + DA_32
+
+LDTLen equ $ - LABEL_LDT
+
+; 选择子
+SelectorLDTCodeA equ LABEL_LDT_DESC_CODEA - LABEL_LDT + SA_TIL
+; end of ldt
+
+
+[SECTION .la]
+ALIGN 32
+[BITS 32]
+LABEL_CODEA:
+    mov ax, SelectorVideo
+    mov gs, ax
+    mov byte [gs:0x00], 'Y'
+    mov byte [gs:0x01], 0Ch
+    jmp $
+CodeALen equ $ - LABEL_CODEA
+; end of codeA
