@@ -1,4 +1,4 @@
-LOADER_BASE_ADDR    equ 0x900
+LOADER_BASE_ADDR    equ 0x08000
 LOADER_START_SECTOR equ 0x2
 
 org 0x7c00
@@ -35,7 +35,7 @@ org 0x7c00
 
     mov eax, LOADER_START_SECTOR
     mov bx, LOADER_BASE_ADDR
-    mov cx, 1
+    mov cx, 2
     call read_sectors   
 
     jmp LOADER_BASE_ADDR
