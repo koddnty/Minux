@@ -4,11 +4,19 @@ DA_DRW EQU 92h          ; 可读写数据段属性
 DA_DRWA EQU 93h          ; 存在的已访问的可读写数据段属性
 DA_LDT EQU 82h          ; LDT段属性
 
-
 DA_DPL_0 EQU 00h         ; DPL=0
 DA_DPL_1 EQU 20h         ; DPL=1
 DA_DPL_2 EQU 40h         ; DPL=2
 DA_DPL_3 EQU 60h         ; DPL=3
+
+SA_RPL_0 EQU 0h           ; RPL=0
+SA_RPL_1 EQU 1h           ; RPL=1
+SA_RPL_2 EQU 2h           ; RPL=2
+SA_RPL_3 EQU 3h           ; RPL=3
+
+
+
+
 
 SA_TIL EQU 4h           ; LDT选择子中的TI位
 
@@ -97,6 +105,16 @@ PM_BEGIN:
     mov byte [LABEL_LDT_DESC_CODEA + 7], ah
 
 
+    ; 初始化调用门
+    xor eax, eax
+    mov ax, cs
+    shl eax, 4
+    add eax, PM_SEG_CODE_DEST
+    mov word [PM_DESC_CODE_DEST + 2], ax
+    shl eax, 16
+    mov byte [PM_DESC_CODE_DEST + 4], al
+    mov byte [PM_DESC_CODE_DEST + 7], ah
+
     ; 加载GDTR
     xor eax, eax
     mov ax, ds
@@ -130,12 +148,19 @@ PM_BEGIN:
 [SECTION .gdt]              ;   段基址      界限                属性
 PM_GDT:             Descriptor  0,          0,                  0
 PM_DESC_CODE32:     Descriptor  0,          SegCode32Len - 1,   DA_32 | DA_C
-PM_DESC_DATA32:     Descriptor  0,          DATALen - 1,        DA_DRW
+PM_DESC_DATA32:     Descriptor  0,          DATALen - 1,        DA_DRW + DA_DPL_1
 PM_DESC_STACK32:    Descriptor  0,          TopOfStack - 1,     DA_DRW + DA_32
 PM_DESC_TEST:       Descriptor  0200000h,   0ffffh,             DA_DRW
 PM_DESC_VIDEO:      Descriptor  0B8000h,    0ffffh,             DA_DRW
 
 LABEL_DESC_LDT:     Descriptor  0,          LDTLen - 1,         DA_LDT
+
+PM_DESC_CODE_DEST:    Descriptor  0,          SegCodeDestLen - 1, DA_32 | DA_C
+PM_CALL_GATE_TEST:
+    dw 00000h
+    dw SelectorCodeDest
+    dw 08c00h
+    dw 00000h
 ; end of defination gdt
 GdtLen equ $ - PM_GDT
 GdtPtr dw GdtLen - 1
@@ -149,6 +174,9 @@ SelectorTest    equ PM_DESC_TEST    - PM_GDT
 SelectorVideo   equ PM_DESC_VIDEO   - PM_GDT
 
 SelectorLDT     equ LABEL_DESC_LDT  - PM_GDT
+
+SelectorCodeDest equ PM_DESC_CODE_DEST - PM_GDT
+SelectorCallGateTest equ PM_CALL_GATE_TEST - PM_GDT
 ; end of [SECTION .gdt]
 
 
@@ -221,10 +249,12 @@ PM_SEG_CODE32:
     jmp .1
 
 .2:     ; 显示完毕
-    mov ax, SelectorLDT
-    lldt ax 
-    jmp SelectorLDTCodeA:0
-    
+    ; mov ax, SelectorLDT
+    ; lldt ax 
+    ; jmp SelectorLDTCodeA:0
+    call SelectorCallGateTest:0
+
+
 SegCode32Len equ $ - PM_SEG_CODE32
 
 
@@ -257,3 +287,17 @@ LABEL_CODEA:
     jmp $
 CodeALen equ $ - LABEL_CODEA
 ; end of codeA
+
+
+[SECTION .sdest]
+ALIGN 32
+[BITS 32]
+PM_SEG_CODE_DEST:
+    mov ax, SelectorVideo
+    mov gs, ax
+    mov edi, (80 * 5 + 0) * 2
+    mov byte [gs:edi], 'G'
+    mov byte [gs:edi + 1], 0Ch
+    retf
+SegCodeDestLen equ $ - PM_SEG_CODE_DEST
+; end of code DEST
