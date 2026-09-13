@@ -14,7 +14,7 @@ SA_RPL_1 EQU 1h           ; RPL=1
 SA_RPL_2 EQU 2h           ; RPL=2
 SA_RPL_3 EQU 3h           ; RPL=3
 
-
+DA_386TSS EQU 89h         ; 386TSS段属性
 
 
 
@@ -39,6 +39,52 @@ mov byte [gs:0x01], 0xA4
 
 jmp PM_BEGIN
 
+[SECTION .s3]
+ALIGN 32
+[BITS 32]
+PM_STACK3:
+    times 512 db 0
+TopOfStack3 equ $ - PM_STACK3 - 1
+
+
+[SECTION .tss]
+ALIGN 32
+[BITS 32]
+PM_TSS:
+    dd 0       ; Back
+    dd TopOfStack           ; 0 级堆栈 ESP0
+    dd SelectorStack32       ; 0 级堆栈 SS0
+
+    dd 0       ; 1 级堆栈 ESP1
+    dd 0       ; 1 级堆栈 SS1
+
+    dd 0       ; 2 级堆栈 ESP2
+    dd 0       ; 2 级堆栈 SS2
+
+    dd 0       ; CR3
+    dd 0       ; EIP
+    dd 0       ; EFLAGS
+    dd 0       ; EAX
+    dd 0       ; ECX
+    dd 0       ; EDX
+    dd 0       ; EBX
+    dd 0       ; ESP
+    dd 0       ; EBP
+    dd 0       ; ESI
+    dd 0       ; EDI
+    dd 0       ; ES
+    dd 0       ; CS
+    dd 0       ; SS
+    dd 0       ; DS
+    dd 0       ; FS
+    dd 0       ; GS
+    dd 0       ; LDT
+
+    dw 0       ; 调试陷阱标志
+    dw $ - PM_TSS + 2       ; I/O 位图基地址
+    db 0FFh    ; I/O 位图结束标志
+
+TSSLen equ $ - PM_TSS
 
 [SECTION .s16]
 [BITS 16]
@@ -115,6 +161,28 @@ PM_BEGIN:
     mov byte [PM_DESC_CODE_DEST + 4], al
     mov byte [PM_DESC_CODE_DEST + 7], ah
 
+    ; 初始化ring3
+    xor eax, eax
+    mov ax, cs
+    shl eax, 4
+    add eax, PM_CODE_RING3
+    mov word [PM_DESC_CODE_RING3 + 2], ax      ; TODO
+    shl eax, 16
+    mov byte [PM_DESC_CODE_RING3 + 4], al
+    mov byte [PM_DESC_CODE_RING3 + 7], ah
+
+    ; TSS 初始化
+    xor eax, eax
+    mov ax, cs
+    shl eax, 4
+    add eax, PM_TSS
+    mov word [PM_DESC_TSS + 2], ax      ; TODO
+    shl eax, 16
+    mov byte [PM_DESC_TSS + 4], al
+    mov byte [PM_DESC_TSS + 7], ah
+
+    ; 初始化ring3 stack
+
     ; 加载GDTR
     xor eax, eax
     mov ax, ds
@@ -151,15 +219,20 @@ PM_DESC_CODE32:     Descriptor  0,          SegCode32Len - 1,   DA_32 | DA_C
 PM_DESC_DATA32:     Descriptor  0,          DATALen - 1,        DA_DRW + DA_DPL_1
 PM_DESC_STACK32:    Descriptor  0,          TopOfStack - 1,     DA_DRW + DA_32
 PM_DESC_TEST:       Descriptor  0200000h,   0ffffh,             DA_DRW
-PM_DESC_VIDEO:      Descriptor  0B8000h,    0ffffh,             DA_DRW
+PM_DESC_VIDEO:      Descriptor  0B8000h,    0ffffh,             DA_DRW + DA_DPL_3
 
 LABEL_DESC_LDT:     Descriptor  0,          LDTLen - 1,         DA_LDT
 
 PM_DESC_CODE_DEST:    Descriptor  0,          SegCodeDestLen - 1, DA_32 | DA_C
+PM_DESC_CODE_RING3:    Descriptor  0,          SegCodeRing3Len - 1, DA_32 | DA_C + DA_DPL_3
+PM_DESC_STACK3:     Descriptor  0,          TopOfStack3 - 1,     DA_DRW + DA_32 + DA_DPL_3
+PM_DESC_TSS:   Descriptor  0,          TSSLen - 1,              DA_386TSS
+
+
 PM_CALL_GATE_TEST:
     dw 00000h
     dw SelectorCodeDest
-    dw 08c00h
+    dw 0ec00h
     dw 00000h
 ; end of defination gdt
 GdtLen equ $ - PM_GDT
@@ -176,7 +249,12 @@ SelectorVideo   equ PM_DESC_VIDEO   - PM_GDT
 SelectorLDT     equ LABEL_DESC_LDT  - PM_GDT
 
 SelectorCodeDest equ PM_DESC_CODE_DEST - PM_GDT
-SelectorCallGateTest equ PM_CALL_GATE_TEST - PM_GDT
+SelectorCallGateTest equ PM_CALL_GATE_TEST - PM_GDT + SA_RPL_3
+
+SelectorCodeRing3 equ PM_DESC_CODE_RING3 - PM_GDT + SA_RPL_3
+SelectorStack3 equ PM_DESC_STACK3 - PM_GDT + SA_RPL_3
+SelectorTSS equ PM_DESC_TSS - PM_GDT
+
 ; end of [SECTION .gdt]
 
 
@@ -249,10 +327,21 @@ PM_SEG_CODE32:
     jmp .1
 
 .2:     ; 显示完毕
+    ; gate 1 test
     ; mov ax, SelectorLDT
     ; lldt ax 
     ; jmp SelectorLDTCodeA:0
-    call SelectorCallGateTest:0
+    ; call SelectorCallGateTest:0
+
+    ; gete 2 test
+    ; load tss
+    mov ax, SelectorTSS
+    ltr ax
+    push SelectorStack3
+    push TopOfStack3
+    push SelectorCodeRing3
+    push 0
+    retf        ; 进入ring3
 
 
 SegCode32Len equ $ - PM_SEG_CODE32
@@ -296,8 +385,31 @@ PM_SEG_CODE_DEST:
     mov ax, SelectorVideo
     mov gs, ax
     mov edi, (80 * 5 + 0) * 2
-    mov byte [gs:edi], 'G'
+    mov byte [gs:edi], 'D'
     mov byte [gs:edi + 1], 0Ch
-    retf
+    
+    mov ax, SelectorLDT
+    lldt ax
+    jmp SelectorLDTCodeA:0
+
 SegCodeDestLen equ $ - PM_SEG_CODE_DEST
 ; end of code DEST
+
+
+
+[SECTION .ring3]
+ALIGN 32
+[BITS 32]
+PM_CODE_RING3:
+    mov ax, SelectorVideo
+    mov gs, ax
+    mov edi, (80 * 8 + 0) * 2
+    mov byte [gs:edi], '3'
+    mov byte [gs:edi + 1], 0Ch
+    
+    call SelectorCallGateTest:0
+    jmp $
+
+SegCodeRing3Len equ $ - PM_CODE_RING3
+; end of code DEST
+
