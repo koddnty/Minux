@@ -91,6 +91,14 @@ read_sectors:
     mov dx, 0x1f0
 
     .go_on:
+        push dx
+        mov dx, 0x1f7
+    .wait_drq:
+        in al, dx
+        and al, 0x88
+        cmp al, 0x08
+        jnz .wait_drq
+        pop dx
         in ax, dx
         mov [bx], ax
         add bx, 2

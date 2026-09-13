@@ -93,7 +93,7 @@ PM_BEGIN:
     mov eax, cr0
     or eax, 1
     mov cr0, eax
-    jmp dword SelectorCode32:PM_SEG_CODE32
+    jmp dword SelectorCode32:0
     
 
 
@@ -103,8 +103,8 @@ PM_GDT:             Descriptor  0,          0,                  0
 PM_DESC_CODE32:     Descriptor  0,          SegCode32Len - 1,   DA_32 | DA_C
 PM_DESC_DATA32:     Descriptor  0,          DATALen - 1,        DA_DRW
 PM_DESC_STACK32:    Descriptor  0,          TopOfStack - 1,     DA_DRW + DA_32
-PM_DESC_TEST:       Descriptor  0200000h,  0ffffh,              DA_DRW
-PM_DESC_VIDEO:      Descriptor  0B8000h,    0,                  DA_DRW
+PM_DESC_TEST:       Descriptor  0200000h,   0ffffh,             DA_DRW
+PM_DESC_VIDEO:      Descriptor  0B8000h,    0ffffh,             DA_DRW
 ; end of defination gdt
 GdtLen equ $ - PM_GDT
 GdtPtr dw GdtLen - 1
@@ -150,7 +150,7 @@ PM_SEG_CODE32:
 
     mov byte [gs:0x00], '5'
     mov byte [gs:0x01], 0xA4
-    jmp $
+
 
     mov ax, SelectorData32      ; 把数据段选择子加载到段寄存器中
     mov ds, ax
@@ -166,18 +166,18 @@ PM_SEG_CODE32:
     mov esp, TopOfStack
 
 
-    mov ax, 0xb800
-    mov gs, ax
-    mov byte [gs:0x00], '4'
-    mov byte [gs:0x01], 0xA4
-    jmp$ 
-
-    mov ah, 0cH
     xor esi, esi
     xor edi, edi
     mov esi, OffsetPMMessage
     mov edi, (80 * 10 + 0) * 2
     cld
+
+    mov ax, SelectorVideo
+    mov gs, ax
+    mov byte [gs:0x00], '6'
+    mov byte [gs:0x01], 0xA4
+
+    mov ah, 0cH                 ; 必须放在 mov ax, SelectorVideo 之后，否则 AH 被清零
 
 .1:
     lodsb
