@@ -1,6 +1,6 @@
-LOADER_BASE_ADDR    equ 0x08000
-LOADER_START_SECTOR equ 0x2
-LOADER_SECTOR_COUNT equ 0x5    ; 必须 >= ceil(ps.bin 大小 / 512)，目前 ps.bin = 2123B
+LOADER_BASE_ADDR    equ 0x900
+LOADER_START_SECTOR equ 02h
+LOADER_SECTOR_COUNT equ 02h    ; 必须 >= ceil(ps.bin 大小 / 512)，目前 ps.bin = 2123B
 
 org 0x7c00
     mov ax, cs
