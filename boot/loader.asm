@@ -4,6 +4,8 @@ DA_32 EQU 4000h         ; 32位代码段属性
 DA_C EQU 98h            ; 只执行代码段属性
 DA_DRW EQU 92h          ; 可读写数据段属性
 DA_DRWA EQU 93h          ; 存在的已访问的可读写数据段属性
+; repair: 新增 G 位常量（段界限以 4KB 为单位），宏里会把它放进字节6的 bit7
+DA_LIMIT_4K EQU 8000h
 
 %macro Descriptor 3
     dw %2 & 0FFFFh
@@ -83,6 +85,8 @@ PM_DESC_LOADER_CODE32:      Descriptor  0,          LOADER_CODE32_LEN - 1,      
 PM_DESC_LOADER_DATA32:      Descriptor  0,          LOADER_DATA32_LEN_LEN - 1,    DA_DRW                ; loader 数据段
 PM_DESC_LOADER_STACK32:     Descriptor  0,          LOADER_STACK32_TOP - 1,       DA_DRW + DA_32        ; loader 栈段
 PM_DESC_LOADER_VIDEO:       Descriptor  0B8000h,    0ffffh,                       DA_DRW                ; loader 显示段
+; 平坦数据段：基址 0、界限 4GB，专门用来按物理地址访问页表
+PM_DESC_FLAT_DATA32:        Descriptor  0,          0FFFFFh,                      DA_DRW + DA_32 + DA_LIMIT_4K
 ; end of gdt define
 GdtLen equ $ - PM_GDT
 GdtPtr dw GdtLen - 1
@@ -93,6 +97,7 @@ SelectorLoaderCode32  equ PM_DESC_LOADER_CODE32  - PM_GDT
 SelectorLoaderData32  equ PM_DESC_LOADER_DATA32  - PM_GDT
 SelectorLoaderStack32 equ PM_DESC_LOADER_STACK32 - PM_GDT
 SelectorLoaderVideo   equ PM_DESC_LOADER_VIDEO   - PM_GDT
+SelectorFlatData32    equ PM_DESC_FLAT_DATA32    - PM_GDT
 
 ; loader 数据段 ----------------------------------------
 [SECTION .data1]
@@ -115,8 +120,6 @@ LOADER_STACK32_TOP equ $ - PM_LOADER_STACK32 - 1
 
 
 
-
-
 ; 保护模式入口 ======================================== 2
 [SECTION .s32]
 [BITS 32]
@@ -133,8 +136,58 @@ PM_LOADER_CODE32:
     ; 重新加载保护模式下的显存段
     mov ax, SelectorLoaderVideo
     mov gs, ax
-    ; 测试保护模式显存访问
+
+
+    ; 初始化虚拟内存 --------------------
+    mov ax, SelectorFlatData32
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    ; 置空pagedir
+    mov edi, PageDirectory
+    mov ecx, 1024
+    xor eax, eax
+.ClearPageDirectory:
+    mov [edi], eax
+    add edi, 4
+    loop .ClearPageDirectory
+
+    ; 初始化第一个页表
+    mov edi, PageTable
+    mov eax, 0x00000003       ; 第一个物理页地址 0 + Present + RW
+    mov ecx, 1024
+.InitPageTable:
+    mov [edi], eax
+    add eax, 0x1000         ; 下一个 PTE 对应下一个 4KB 物理页
+    add edi, 4              ; 下一个 PTE
+    loop .InitPageTable
+
+    ; 设置 Page Directory[0]
+    mov eax, PageTable
+    or eax, 0x003
+    mov [PageDirectory], eax
+
+    ; 设置cr3， cr0
+    mov eax, PageDirectory
+    mov cr3, eax
+
+    mov eax, cr0
+    or eax, 0x80000000
+    mov cr0, eax
+
+    ; 测试虚拟内存
     mov byte [gs:0], 'A'
     mov byte [gs:1], 0x07
     jmp $
+
 LOADER_CODE32_LEN equ $ - PM_LOADER_CODE32
+
+
+; 页表 ----------------------------------------
+; repair: 原来用 align 4096 把页目录/页表放在代码后面，实际落到 0xA000 / 0xB000，
+; repair: 而 0xB000 那张页表正好压住 0xB8000~0xBFFF，也就是文本显存 ——
+; repair: 初始化页表时会把整个屏幕覆盖成垃圾数据。
+; repair: 改成固定放在两个空闲物理页上，既不压显存也不占 loader.bin 空间。
+PageDirectory equ 0x20000
+PageTable     equ 0x21000
+
