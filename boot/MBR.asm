@@ -1,6 +1,6 @@
-LOADER_BASE_ADDR    equ 0x900
-LOADER_START_SECTOR equ 02h
-LOADER_SECTOR_COUNT equ 02h    ; 必须 >= ceil(ps.bin 大小 / 512)，目前 ps.bin = 2123B
+LOADER_BASE_ADDR    equ 0x08000
+LOADER_START_SECTOR equ 03h
+LOADER_SECTOR_COUNT equ 05h    ; 必须 >= ceil(ps.bin 大小 / 512)，目前 ps.bin = 2123B
 
 org 0x7c00
     mov ax, cs
@@ -14,25 +14,19 @@ org 0x7c00
 
     mov ah, 0x06
     mov al, 0x00
-    mov bh, 0x17
+    mov bh, 0x07
     mov cx, 0x0000
     mov dx, 0x184F
     int 0x10
 
-    mov byte [gs:0x00], '1'
-    mov byte [gs:0x01], 0xA4
-
-    mov byte [gs:0x02], ' '
-    mov byte [gs:0x03], 0xA4
-
     mov byte [gs:0x04], 'M'
-    mov byte [gs:0x05], 0xA4
+    mov byte [gs:0x05], 0x07
 
     mov byte [gs:0x06], 'B'
-    mov byte [gs:0x07], 0xA4
+    mov byte [gs:0x07], 0x07
 
     mov byte [gs:0x08], 'R'
-    mov byte [gs:0x09], 0xA4
+    mov byte [gs:0x09], 0x07
 
     mov eax, LOADER_START_SECTOR
     mov bx, LOADER_BASE_ADDR
