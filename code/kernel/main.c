@@ -8,7 +8,7 @@
 
 
 int kernel_main(void) {
-    kprintf("Loading kernel...\n");
+    kVagprintf("Loading kernel...\n");
 
     return 0;
 }

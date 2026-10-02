@@ -26,14 +26,20 @@ SECTOR_LOADER  := 3
 SECTOR_KERNEL  := 32
 KERNEL_SECTORS := 16
 KERNEL_BASE    := 0x10000
+FS_DATA_START  := 64      # 文件数据/子目录节点从哪个扇区开始（host/build.c 分配）
 IMAGE_MB       := 128
 
 NASM      := nasm
 CC        := gcc
 NASMFLAGS := -f bin
 
+# 布局常量同时传给 C 工具（-D），这样 Makefile 仍是唯一真相，host/build.c 不再自己写死扇区号
+LAYOUT_DEFS := -DSECTOR_MBR=$(SECTOR_MBR) -DSECTOR_LOADER=$(SECTOR_LOADER) \
+               -DSECTOR_KERNEL=$(SECTOR_KERNEL) -DFS_DATA_START=$(FS_DATA_START) \
+               -DIMAGE_MB=$(IMAGE_MB)
+
 # 宿主机侧（有 glibc）
-CFLAGS    := -O2 -Wall -D_FILE_OFFSET_BITS=64 -I code -I host
+CFLAGS    := -O2 -Wall -D_FILE_OFFSET_BITS=64 -I code -I host $(LAYOUT_DEFS)
 
 # 内核源码：递归收 code/kernel 下所有 .c / .asm
 #   子目录（lib/、syscall/ …）自动包含 —— 想加新模块就在 code/kernel/ 下建个子目录，
@@ -54,7 +60,7 @@ KCFLAGS   := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
              -fno-asynchronous-unwind-tables -I code -I code/tools \
              $(addprefix -I ,$(KERNEL_INC))
 
-HOST_SUPPORT := host/fsSys.c                    # 公共实现（没有 main，不单独编成工具）
+HOST_SUPPORT := host/fsSys.c host/copyFs.c       # 公共实现（没有 main，不单独编成工具）
 HOST_SRCS  := $(filter-out $(HOST_SUPPORT),$(wildcard host/*.c))
 HOST_TOOLS := $(patsubst host/%.c,$(BIN)/%,$(HOST_SRCS))
 
@@ -112,29 +118,26 @@ kernel-src:
 # ---------------------------------------------------------------------------
 tools: $(HOST_TOOLS)
 
-# 规则：host/xxx.c  →  bin/xxx（自动带上 fsTree.c 和 fsSys.c）
+# 规则：host/xxx.c  →  bin/xxx（自动带上 fsTree.c / fsSys.c / copyFs.c）
 $(BIN)/%: host/%.c code/minFs/fsTree.c $(HOST_SUPPORT) | $(BIN)
 	$(CC) $(CFLAGS) -o $@ $^
 
-fs: $(BIN)/build
-	$(BIN)/build $(IMAGE)
+# 只重建文件系统部分（镜像里已有的引导链不动；内核照旧登记成 /kernel.bin）
+fs: $(BIN)/build $(BIN)/kernel.bin
+	$(BIN)/build --fs-only $(IMAGE) $(BIN)/kernel.bin
 
 $(BIN):
 	@mkdir -p $(BIN)
 
-# 组装镜像 --------------------------------------------------
-# repair: $(BIN)/build 必须写进依赖里。原来只写在 recipe 里，会有两个问题：
-# repair:   * make clean 之后 bin/build 不存在 → 这一行报 "没有那个文件或目录"（错误 127）
-# repair:   * 改了 host/build.c 也不会重编，跑的还是旧工具（和之前 'A'/'B' 同一类问题）
-image:
-	@echo "== 清零镜像 $(IMAGE) ($(IMAGE_MB)MB) =="
-	@dd if=/dev/zero of=$(IMAGE) bs=1M count=$(IMAGE_MB) status=none
-	@dd if=$(BIN)/MBR.bin    of=$(IMAGE) bs=512 seek=$(SECTOR_MBR)    count=1 conv=notrunc status=none
-	@dd if=$(BIN)/loader.bin of=$(IMAGE) bs=512 seek=$(SECTOR_LOADER) conv=notrunc status=none
-	@dd if=$(BIN)/kernel.bin of=$(IMAGE) bs=512 seek=$(SECTOR_KERNEL) conv=notrunc status=none
+# ---------------------------------------------------------------------------
+# 组装镜像（不再用 dd！全部交给 host/build.c 这个"安装器"）
+#   build <镜像> <MBR.bin> <loader.bin> <kernel.bin>
+#   它做的事：建/清镜像 → 按原始扇区写引导链 → 建文件系统（根节点、目录、文件）
+#   扇区号从上面的 LAYOUT_DEFS（-D）传进去，Makefile 仍是唯一真相。
+# ---------------------------------------------------------------------------
+image: check $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin $(BIN)/build
+	$(BIN)/build $(IMAGE) $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin
 	@echo "镜像组装完成：MBR@$(SECTOR_MBR)、loader@$(SECTOR_LOADER)、kernel@$(SECTOR_KERNEL)"
-	$(BIN)/build $(IMAGE)            # ← 最后装文件系统；加 $(BIN)/build 作为依赖，改 host/*.c 会自动重编
-	@echo "文件系统构建完成"
 
 run: image
 	$(QEMU) -drive file=$(IMAGE),format=raw

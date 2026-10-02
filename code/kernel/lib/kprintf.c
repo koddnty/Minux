@@ -10,7 +10,7 @@
 static uint32_t kRow = 0;
 static uint32_t kCol = 0;
 
-void kScroll(uint32_t n) {
+void kVagScroll(uint32_t n) {
     if (n == 0) {
         if (kRow < ROW_MAX) {
             return;
@@ -49,7 +49,7 @@ void kScroll(uint32_t n) {
     }
 }
 
-void kclear(void) {
+void kVagclear(void) {
     for (uint32_t i = 0; i < COL_MAX * ROW_MAX; i++) {
         VIDEO_MEM[i * 2] = ' ';
         VIDEO_MEM[i * 2 + 1] = 0x07;
@@ -58,11 +58,11 @@ void kclear(void) {
     kCol = 0;
 }
 
-void kputc(char c) {
+void kVagputc(char c) {
     if (c == '\n') {
         kCol = 0;
         kRow++;
-        kScroll(0);
+        kVagScroll(0);
         return;
     }
 
@@ -78,13 +78,13 @@ void kputc(char c) {
     if (++kCol >= COL_MAX) {
         kCol = 0;
         kRow++;
-        kScroll(0);
+        kVagScroll(0);
     }
 }
 
-void kputs(const char* s) {
+void kVagputs(const char* s) {
     while (*s) {
-        kputc(*s++);
+        kVagputc(*s++);
     }
 }
 
@@ -93,11 +93,11 @@ static void kPrintUint(uint32_t v, uint32_t base, int negative) {
     int i = 0;
 
     if (negative) {
-        kputc('-');
+        kVagputc('-');
     }
 
     if (v == 0) {
-        kputc('0');
+        kVagputc('0');
         return;
     }
 
@@ -108,31 +108,31 @@ static void kPrintUint(uint32_t v, uint32_t base, int negative) {
     }
 
     while (i-- > 0) {
-        kputc(buf[i]);
+        kVagputc(buf[i]);
     }
 }
 
-void kprintf(const char* fmt, ...) {
+void kVagprintf(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
 
     for (const char* p = fmt; *p; p++) {
         if (*p != '%') {
-            kputc(*p);
+            kVagputc(*p);
             continue;
         }
 
         p++;
         switch (*p) {
         case '%':
-            kputc('%');
+            kVagputc('%');
             break;
         case 'c':
-            kputc((char)va_arg(ap, int));
+            kVagputc((char)va_arg(ap, int));
             break;
         case 's': {
             const char* s = va_arg(ap, const char*);
-            kputs(s ? s : "(null)");
+            kVagputs(s ? s : "(null)");
             break;
         }
         case 'd': {
@@ -147,8 +147,8 @@ void kprintf(const char* fmt, ...) {
             kPrintUint(va_arg(ap, uint32_t), 16, 0);
             break;
         default:                    /* 不认识的格式符原样打出来，方便发现笔误 */
-            kputc('%');
-            kputc(*p);
+            kVagputc('%');
+            kVagputc(*p);
             break;
         }
     }
