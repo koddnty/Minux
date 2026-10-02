@@ -11,12 +11,7 @@
 /* 返回值约定（和 code/minFs 保持一致）：失败 -1，成功 0 或正数。
    判断失败用 ret < 0 / ret != 0。 */
 
-int miDiskOpen(const char* path);      /* 打开已存在的镜像：成功 0，失败 -1 */
-
-/* 新建/清空镜像（替代 dd if=/dev/zero）：O_CREAT|O_TRUNC + ftruncate 到 bytes。
-   不真的写 128MB 个 0，稀疏文件即可。成功 0，失败 -1 */
-int miDiskCreate(const char* path, uint64_t bytes);
-
+int miDiskOpen(const char* path);      /* 成功 0，失败 -1 */
 void miDiskClose(void);
 
 int miReadSector(uint32_t lba, void* buffer, uint32_t count);        /* 成功 0，失败 -1 */

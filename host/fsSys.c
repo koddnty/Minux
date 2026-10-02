@@ -20,29 +20,6 @@ int miDiskOpen(const char* path) {
     return 0;
 }
 
-/* 新建/清空镜像：替代 dd if=/dev/zero of=xxx bs=1M count=128。
- * ftruncate 出来的空洞读出来就是 0，所以不必真的写 128MB 个字节。 */
-int miDiskCreate(const char* path, uint64_t bytes) {
-    if (g_disk_fd != -1) {
-        close(g_disk_fd);
-        g_disk_fd = -1;
-    }
-
-    g_disk_fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
-
-    if (g_disk_fd == -1) {
-        return -1;
-    }
-
-    if (bytes > 0 && ftruncate(g_disk_fd, (off_t)bytes) != 0) {
-        close(g_disk_fd);
-        g_disk_fd = -1;
-        return -1;
-    }
-
-    return 0;
-}
-
 void miDiskClose(void) {
     if (g_disk_fd != -1) {
         close(g_disk_fd);

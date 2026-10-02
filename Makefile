@@ -1,13 +1,19 @@
 # ============================================================================
-#  Minux 构建入口 —— 一条命令从源码到可引导镜像
+#  Minux 构建入口
 #
-#    make            编译全部 + 组装磁盘镜像（默认目标）
-#    make run        组装镜像后启动 QEMU
-#    make debug      组装镜像后带异常日志启动 QEMU（日志写 qemu.log）
-#    make tools      只编宿主机侧工具（host/*.c）
-#    make fs         只把宿主机文件系统工具跑一遍（对着镜像）
+#    make            只编译（MBR / loader / kernel / host 工具），不碰磁盘
+#    make build      重新构建磁盘镜像（清零 + dd 引导链 + 建文件系统）⚠ 会清掉手动加的文件
+#    make run        用【当前】磁盘启动 QEMU（不重建，保留你手动增量加的文件）
+#    make debug      同上，带异常日志（qemu.log）
+#    make tools      只编宿主机侧工具（host/*.c → bin/*）
+#    make fs         只重建文件系统部分（引导链不动）
+#    make kernel-src 列出内核会编哪些文件 / include 路径
 #    make clean      删掉编译产物
 #    make help       打印这段说明
+#
+#  典型用法：
+#    make && make build && make run      # 改了代码，重建磁盘再跑
+#    make && ./bin/fshell ../nvme0virtual  # 只重编工具，然后手动往盘里加文件
 #
 #  常用覆盖：make IMAGE=../other.img  /  make QEMU=qemu-system-i386
 # ============================================================================
@@ -26,20 +32,14 @@ SECTOR_LOADER  := 3
 SECTOR_KERNEL  := 32
 KERNEL_SECTORS := 16
 KERNEL_BASE    := 0x10000
-FS_DATA_START  := 64      # 文件数据/子目录节点从哪个扇区开始（host/build.c 分配）
 IMAGE_MB       := 128
 
 NASM      := nasm
 CC        := gcc
 NASMFLAGS := -f bin
 
-# 布局常量同时传给 C 工具（-D），这样 Makefile 仍是唯一真相，host/build.c 不再自己写死扇区号
-LAYOUT_DEFS := -DSECTOR_MBR=$(SECTOR_MBR) -DSECTOR_LOADER=$(SECTOR_LOADER) \
-               -DSECTOR_KERNEL=$(SECTOR_KERNEL) -DFS_DATA_START=$(FS_DATA_START) \
-               -DIMAGE_MB=$(IMAGE_MB)
-
 # 宿主机侧（有 glibc）
-CFLAGS    := -O2 -Wall -D_FILE_OFFSET_BITS=64 -I code -I host $(LAYOUT_DEFS)
+CFLAGS    := -O2 -Wall -D_FILE_OFFSET_BITS=64 -I code -I host
 
 # 内核源码：递归收 code/kernel 下所有 .c / .asm
 #   子目录（lib/、syscall/ …）自动包含 —— 想加新模块就在 code/kernel/ 下建个子目录，
@@ -64,9 +64,10 @@ HOST_SUPPORT := host/fsSys.c host/copyFs.c       # 公共实现（没有 main，
 HOST_SRCS  := $(filter-out $(HOST_SUPPORT),$(wildcard host/*.c))
 HOST_TOOLS := $(patsubst host/%.c,$(BIN)/%,$(HOST_SRCS))
 
-.PHONY: all image run debug tools fs check clean help kernel-src
+.PHONY: all build run debug tools fs check clean help kernel-src check-image
 
-all: image
+# 默认目标：只编译，不动磁盘（所以你别怕 make 一下就把盘里的文件冲了）
+all: $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin $(HOST_TOOLS)
 
 # ---------------------------------------------------------------------------
 # 引导链
@@ -122,27 +123,34 @@ tools: $(HOST_TOOLS)
 $(BIN)/%: host/%.c code/minFs/fsTree.c $(HOST_SUPPORT) | $(BIN)
 	$(CC) $(CFLAGS) -o $@ $^
 
-# 只重建文件系统部分（镜像里已有的引导链不动；内核照旧登记成 /kernel.bin）
+# 只重建文件系统部分（引导链不动；内核照旧由 build.c 装进去）
 fs: $(BIN)/build $(BIN)/kernel.bin
-	$(BIN)/build --fs-only $(IMAGE) $(BIN)/kernel.bin
+	$(BIN)/build $(IMAGE) $(BIN)/kernel.bin
 
 $(BIN):
 	@mkdir -p $(BIN)
 
 # ---------------------------------------------------------------------------
-# 组装镜像（不再用 dd！全部交给 host/build.c 这个"安装器"）
-#   build <镜像> <MBR.bin> <loader.bin> <kernel.bin>
-#   它做的事：建/清镜像 → 按原始扇区写引导链 → 建文件系统（根节点、目录、文件）
-#   扇区号从上面的 LAYOUT_DEFS（-D）传进去，Makefile 仍是唯一真相。
+# 重新构建磁盘：清零 + dd 写引导链 + host/build.c 建文件系统
+#   这条命令会把整块盘清空重建，手动用 fshell 加的文件会没 —— 想保留就别跑它
 # ---------------------------------------------------------------------------
-image: check $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin $(BIN)/build
-	$(BIN)/build $(IMAGE) $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin
-	@echo "镜像组装完成：MBR@$(SECTOR_MBR)、loader@$(SECTOR_LOADER)、kernel@$(SECTOR_KERNEL)"
+build: all
+	@echo "== 清零镜像 $(IMAGE) ($(IMAGE_MB)MB) =="
+	@dd if=/dev/zero of=$(IMAGE) bs=1M count=$(IMAGE_MB) status=none
+	@dd if=$(BIN)/MBR.bin    of=$(IMAGE) bs=512 seek=$(SECTOR_MBR)    count=1 conv=notrunc status=none
+	@dd if=$(BIN)/loader.bin of=$(IMAGE) bs=512 seek=$(SECTOR_LOADER) conv=notrunc status=none
+	@dd if=$(BIN)/kernel.bin of=$(IMAGE) bs=512 seek=$(SECTOR_KERNEL) conv=notrunc status=none
+	@echo "引导链写入完成：MBR@$(SECTOR_MBR)、loader@$(SECTOR_LOADER)、kernel@$(SECTOR_KERNEL)"
+	$(BIN)/build $(IMAGE) $(BIN)/kernel.bin
 
-run: image
+# 启动前先检查镜像在不在（run 故意不依赖 build：要保留手动加的文件时直接跑就行）
+check-image:
+	@test -f $(IMAGE) || { echo "镜像 $(IMAGE) 不存在，先跑一次：make build"; exit 1; }
+
+run: check-image
 	$(QEMU) -drive file=$(IMAGE),format=raw
 
-debug: image
+debug: check-image
 	@echo "== 启动 QEMU，异常日志写 qemu.log（Ctrl-C 结束）=="
 	$(QEMU) -drive file=$(IMAGE),format=raw -no-reboot -no-shutdown \
 	    -d int,cpu_reset -D qemu.log
@@ -159,7 +167,7 @@ clean:
 # ---------------------------------------------------------------------------
 
 help:
-	@sed -n '2,14p' Makefile | sed 's/^# \{0,1\}//'
+	@sed -n '2,18p' Makefile | sed 's/^# \{0,1\}//'
 	@echo ""
 	@echo "当前布局：镜像=$(IMAGE)"
 	@echo "  MBR@$(SECTOR_MBR)  loader@$(SECTOR_LOADER)  kernel@$(SECTOR_KERNEL)（$(KERNEL_SECTORS) 扇区，加载到 $(KERNEL_BASE)）"
