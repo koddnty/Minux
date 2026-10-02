@@ -4,7 +4,6 @@ DA_32 EQU 4000h         ; 32位代码段属性
 DA_C EQU 98h            ; 只执行代码段属性
 DA_DRW EQU 92h          ; 可读写数据段属性
 DA_DRWA EQU 93h          ; 存在的已访问的可读写数据段属性
-; repair: 新增 G 位常量（段界限以 4KB 为单位），宏里会把它放进字节6的 bit7
 DA_LIMIT_4K EQU 8000h
 
 %macro Descriptor 3
@@ -176,7 +175,7 @@ PM_LOADER_CODE32:
     mov cr0, eax
 
     ; 测试虚拟内存
-    mov byte [gs:0], 'A'
+    mov byte [gs:0], 'B'
     mov byte [gs:1], 0x07
     jmp $
 
@@ -184,10 +183,6 @@ LOADER_CODE32_LEN equ $ - PM_LOADER_CODE32
 
 
 ; 页表 ----------------------------------------
-; repair: 原来用 align 4096 把页目录/页表放在代码后面，实际落到 0xA000 / 0xB000，
-; repair: 而 0xB000 那张页表正好压住 0xB8000~0xBFFF，也就是文本显存 ——
-; repair: 初始化页表时会把整个屏幕覆盖成垃圾数据。
-; repair: 改成固定放在两个空闲物理页上，既不压显存也不占 loader.bin 空间。
 PageDirectory equ 0x20000
 PageTable     equ 0x21000
 
