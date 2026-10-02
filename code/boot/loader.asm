@@ -1,4 +1,11 @@
 LOADER_BASE_ADDR    equ 0x08000
+KERNEL_BASE_ADDR    equ 0x10000
+
+KERNEL_SECTOR_BEGIN equ 20h
+KERNEL_SECTOR_COUNT equ 010h
+
+
+
 ; 宏定义 ----------------------------------------
 DA_32 EQU 4000h         ; 32位代码段属性
 DA_C EQU 98h            ; 只执行代码段属性
@@ -86,6 +93,10 @@ PM_DESC_LOADER_STACK32:     Descriptor  0,          LOADER_STACK32_TOP - 1,     
 PM_DESC_LOADER_VIDEO:       Descriptor  0B8000h,    0ffffh,                       DA_DRW                ; loader 显示段
 ; 平坦数据段：基址 0、界限 4GB，专门用来按物理地址访问页表
 PM_DESC_FLAT_DATA32:        Descriptor  0,          0FFFFFh,                      DA_DRW + DA_32 + DA_LIMIT_4K
+; repair: 新增平坦【代码】段：跳内核时 CS 必须换成基址 0 的段，否则
+; repair: loader 的 CS 基址是 PM_LOADER_CODE32(≈0x83xx)，同样一条 jmp 0x10000
+; repair: 会跑到线性地址 0x83xx+0x10000 去，而内核其实被读在物理 0x10000。
+PM_DESC_FLAT_CODE32:        Descriptor  0,          0FFFFFh,                      DA_C + DA_32 + DA_LIMIT_4K
 ; end of gdt define
 GdtLen equ $ - PM_GDT
 GdtPtr dw GdtLen - 1
@@ -97,6 +108,7 @@ SelectorLoaderData32  equ PM_DESC_LOADER_DATA32  - PM_GDT
 SelectorLoaderStack32 equ PM_DESC_LOADER_STACK32 - PM_GDT
 SelectorLoaderVideo   equ PM_DESC_LOADER_VIDEO   - PM_GDT
 SelectorFlatData32    equ PM_DESC_FLAT_DATA32    - PM_GDT
+SelectorFlatCode32    equ PM_DESC_FLAT_CODE32    - PM_GDT
 
 ; loader 数据段 ----------------------------------------
 [SECTION .data1]
@@ -175,9 +187,21 @@ PM_LOADER_CODE32:
     mov cr0, eax
 
     ; 测试虚拟内存
-    mov byte [gs:0], 'B'
+    mov byte [gs:0], 'A'
     mov byte [gs:1], 0x07
+
+    ; 加载内核程序
+    push dword KERNEL_SECTOR_COUNT
+    push dword KERNEL_BASE_ADDR
+    push dword KERNEL_SECTOR_BEGIN
+    call miReadSector
+
+    ; 进入内核（远跳转：先把 CS 换成基址 0 的平坦代码段，跳到的才是物理 0x10000）
+    jmp dword SelectorFlatCode32:KERNEL_BASE_ADDR
     jmp $
+
+%define MI_READSECTOR_NO_SECTION
+%include "code/minFs/readSector.asm"
 
 LOADER_CODE32_LEN equ $ - PM_LOADER_CODE32
 
