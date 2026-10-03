@@ -9,6 +9,9 @@
 ; ===========================================================================
 [BITS 32]
 
+;   syscall 地址回填 IDT 0x80 门
+extern syscall_entry
+
 ; 宏定义 ----------------------------------------
 DA_32 EQU 4000h         ; 32位代码段属性
 DA_C EQU 98h            ; 只执行代码段属性
@@ -138,45 +141,6 @@ page_fault_entry:
     add esp, 4
     iretd
 
-
-; 系统调用入口
-syscall_entry:
-    push ds
-    push es
-    push fs
-    push gs
-
-    mov ax, SelectorKernelData32
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-
-    pushad
-
-    cmp eax, 1
-    je syscall_exit
-
-    popad
-
-    pop gs
-    pop fs
-    pop es
-    pop ds
-
-    iretd
-
-
-syscall_exit:
-    mov byte [0xB8000], 'E'
-    mov byte [0xB8001], 0x07
-
-.exit:
-    cli
-    hlt
-    jmp .exit
-
-
 kernel_fault_panic:
     cli
     hlt
@@ -227,6 +191,12 @@ kernel_reload_cs:
     shr eax, 16
     mov word [IDT + 14 * 8 + 6], ax
 
+    ; repair: 0x80(系统调用)表项同理, 汇编期地址不固定, 运行时再回填
+    mov eax, syscall_entry
+    mov word [IDT + 0x80 * 8], ax
+    shr eax, 16
+    mov word [IDT + 0x80 * 8 + 6], ax
+
     lidt [IdtPtr]
 
 
@@ -243,11 +213,6 @@ kernel_hang:
 
 
 ; void enter_user_mode(uint32_t eip, uint32_t esp)
-;   repair: 原来是 push SelectorUserData32 / SelectorUserCode32 —— 选择子没带 RPL=3,
-;   repair: iret 弹 CS 时因为 CS.RPL==CPL 被当成同特权级返回: 只弹 3 项、CPL 仍是 0,
-;   repair: 根本没进 ring3。必须 |3(SS=0x23, CS=0x1B)。
-;   repair: EFLAGS 原来是 0x202(IF=1): PIT 的时钟中断一来, IDT 里 0x20 是空表项
-;   repair: → #GP → 13 号也空 → #DF → 三重故障重启。测试阶段先给 IF=0。
 global enter_user_mode
 enter_user_mode:
     mov eax, [esp + 4]                  ; 用户代码入口
@@ -307,6 +272,13 @@ GdtPtr:
     dd PM_GDT
 
 ; gdt selector ----------------------------------------
+; repair: 选择子给别的 asm 文件用(如 ksyscall.asm), 要让 NASM 导成 ABS 符号
+global SelectorKernelCode32
+global SelectorKernelData32
+global SelectorUserCode32
+global SelectorUserData32
+global SelectorTSS
+
 SelectorKernelCode32    equ PM_DESC_KERNEL_CODE32  - PM_GDT
 SelectorKernelData32    equ PM_DESC_KERNEL_DATA32  - PM_GDT
 SelectorUserCode32      equ PM_DESC_USER_CODE32  - PM_GDT
@@ -326,21 +298,16 @@ IDT:
     db 0
     db 10001110b
     dw 0                    ; offset 31:16 运行时回填
-    times 241 dq 0
-
-        times (0x80 - 15) dq 0
-
-
-    times (0x80 - 15) dq 0
+    times (0x80 - 15) dq 0  ; 15..127 号表项补零, 这样下面的 0x80 门正好落在第 128 项
 
     ; syscall
-    dw syscall_entry & 0FFFFh
+    dw 0                    ; offset 15:0  运行时回填
     dw SelectorKernelCode32
     db 0
-    db 11101110b
-    dw syscall_entry >> 16
+    db 11101110b            ; repair: DPL=3, 用户态 int 0x80 才不会 #GP
+    dw 0                    ; offset 31:16 运行时回填
 
-    times (256 - 0x81) dq 0
+    times (256 - 0x81) dq 0 ; 129..255 号表项补零, IDT 一共 256 项
 ; end of IDT
 IdtLen equ $ - IDT
 

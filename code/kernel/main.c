@@ -52,5 +52,6 @@ int kernel_main(void) {
 
     enter_user_mode(USER_CODE_VADDR, USER_STACK_TOP);   // 进 ring3, 不返回
 
+    kVagprintf("finished test ring0->3->0\n");
     return 0;
 }

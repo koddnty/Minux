@@ -47,6 +47,10 @@ CFLAGS    := -O2 -Wall -D_FILE_OFFSET_BITS=64 -I code -I host
 KERNEL_C    := $(shell find code/kernel -name '*.c')
 KERNEL_ASM  := $(shell find code/kernel -name '*.asm')
 
+# asm 之间共享的 %include 文件（选择子、Descriptor 宏这类）。
+# repair: 之前 .asm.o 规则只依赖 .asm 自己，加个 .inc 进去 make 不会重编。
+KERNEL_ASM_INC := $(shell find code/kernel -name '*.inc')
+
 # 每个内核子目录都进 include 路径，代码里可以直接 #include "kprintf.h"
 # repair: 原来写的是 $(dir $(shell find … -type d))，而 $(dir) 是"取文件所在目录"的，
 # repair: 对目录用它会把最后一段吃掉（code/kernel/lib → code/kernel/），子目录其实没进搜索路径。
@@ -89,14 +93,18 @@ $(BIN)/loader.bin: code/boot/loader.asm | $(BIN)
 #
 #   和你编用户程序（gcc -m32 -c / ld -m elf_i386）是同一套路，区别只有三点：
 #     1) 加 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin（没有 libc）
-#     2) 链接用内核自己的脚本 kernel.ld（决定加载地址 0x10000 和 __bss_* 符号）
+#     2) 链接用内核自己的脚本 kernel.ld（决定加载地址 $(KERNEL_BASE) 和 __bss_* 符号）
 #     3) 最后 objcopy -O binary 出裸二进制，由 loader 直接读到内存里跑
 #
 #   目标文件按源码目录结构放到 bin/kernel/ 下（如 bin/kernel/lib/kprintf.c.o）
+#
+#   子目录里的 .asm（如 lib/ksyscall.asm）由上面的 find 自动收进来，不用加规则；
+#   跨文件引用符号用 global / extern，选择子这类常量已经导成 ABS 符号。
+#   要共享宏或常量文件，放 code/kernel/*.inc 然后 %include 就行（-I 已经加好）。
 # ---------------------------------------------------------------------------
-$(BIN)/kernel/%.asm.o: code/kernel/%.asm
+$(BIN)/kernel/%.asm.o: code/kernel/%.asm $(KERNEL_ASM_INC)
 	@mkdir -p $(dir $@)
-	$(NASM) -f elf32 $< -o $@
+	$(NASM) -f elf32 $(addprefix -I,$(KERNEL_INC)) $< -o $@
 
 $(BIN)/kernel/%.c.o: code/kernel/%.c
 	@mkdir -p $(dir $@)
@@ -114,6 +122,7 @@ $(BIN)/kernel.bin: $(KERNEL_OBJS) code/kernel/kernel.ld | $(BIN)
 kernel-src:
 	@echo "内核 C   源文件:"; for f in $(KERNEL_C);   do echo "  $$f"; done
 	@echo "内核 asm 源文件:"; for f in $(KERNEL_ASM); do echo "  $$f"; done
+	@echo "asm 共享片段:";   for f in $(KERNEL_ASM_INC); do echo "  $$f"; done
 	@echo "include 路径:";    for f in $(KERNEL_INC); do echo "  $$f"; done
 
 # 用户程序（test/ 里那套）：交给 FS 装盘后由内核加载
