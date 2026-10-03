@@ -92,11 +92,16 @@ kernel_entry:
 
     ; 1) 加载自己的 GDT，然后远跳转重载 CS
     lgdt [GdtPtr]
-    jmp SelectorKernelCode32:.reload_cs
+    jmp SelectorKernelCode32:kernel_reload_cs
 
 
 ; 缺页中断处理函数入口
+; repair: 错误码 bit2 = U/S(0=内核态访问)。内核态缺页基本都是真 bug,
+; repair: 交给"按需分页"会一直补页形成风暴(调试时极难定位), 这里直接停住。
 page_fault_entry:
+    test byte [esp], 0x04
+    jz kernel_fault_panic
+
     push ds
     push es
     push fs
@@ -127,7 +132,16 @@ page_fault_entry:
 
 
 
-.reload_cs:
+; repair: 原来是 .reload_cs 这个"局部标签"，但它上面插进了 page_fault_entry 这个非局部
+; repair: 标签，于是 .reload_cs 挂到了 page_fault_entry 名下，kernel_entry.reload_cs 不存在
+; repair: （报 symbol `kernel_entry.reload_cs' not defined）。改成普通标签。
+kernel_fault_panic:
+    cli
+    hlt
+    jmp kernel_fault_panic
+
+
+kernel_reload_cs:
     ; 2) 数据段全部拉平（基址 0、界限 4G）
     mov ax, SelectorKernelData32
     mov ds, ax
@@ -163,6 +177,13 @@ page_fault_entry:
     ; 加载tss
     mov ax, SelectorTSS
     ltr ax
+
+    ; 回填 14 号(缺页)表项的处理函数地址: 汇编期拿不到重定位后的地址,
+    ; 只能运行时填(和 loader 回填 GDT 基址一个套路)
+    mov eax, page_fault_entry
+    mov word [IDT + 14 * 8], ax
+    shr eax, 16
+    mov word [IDT + 14 * 8 + 6], ax
 
     lidt [IdtPtr]
 
@@ -209,14 +230,17 @@ SelectorTSS             equ PM_DESC_TSS - PM_GDT
 
 
 ; IDT ----------------------------------------
+; repair: 原来写的是 dw page_fault_entry & 0FFFFh / >> 16 —— nasm 不允许对可重定位
+; repair: 的标签做 & 和 >>（报 "may only be applied to scalar values"），编不过。
+; repair: 改成先留 0，运行时代码里回填（见上面 lidt 之前那几行）。
 align 8
 IDT:
     times 14 dq 0
-    dw page_fault_entry & 0FFFFh
+    dw 0                    ; offset 15:0  运行时回填
     dw SelectorKernelCode32
     db 0
     db 10001110b
-    dw page_fault_entry >> 16
+    dw 0                    ; offset 31:16 运行时回填
     times 241 dq 0
 ; end of IDT
 IdtLen equ $ - IDT

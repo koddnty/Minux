@@ -31,7 +31,7 @@ SECTOR_MBR     := 0
 SECTOR_LOADER  := 3
 SECTOR_KERNEL  := 32
 KERNEL_SECTORS := 16
-KERNEL_BASE    := 0x10000
+KERNEL_BASE    := 0x100000
 IMAGE_MB       := 128
 
 NASM      := nasm
@@ -52,8 +52,13 @@ KERNEL_ASM  := $(shell find code/kernel -name '*.asm')
 # repair: 对目录用它会把最后一段吃掉（code/kernel/lib → code/kernel/），子目录其实没进搜索路径。
 KERNEL_INC  := $(sort $(addsuffix /,$(shell find code/kernel -type d)))
 
+# 内核也要用的 libc 子集：实现在 code/tools，声明在 code/tools/string.h
+# （内核是 freestanding，没有 glibc，memset/memcpy 这些得自己链进来）
+KERNEL_SUPPORT_C := code/tools/cstring.c
+
 KERNEL_OBJS := $(patsubst code/kernel/%.asm,$(BIN)/kernel/%.asm.o,$(KERNEL_ASM)) \
-               $(patsubst code/kernel/%.c,$(BIN)/kernel/%.c.o,$(KERNEL_C))
+               $(patsubst code/kernel/%.c,$(BIN)/kernel/%.c.o,$(KERNEL_C)) \
+               $(patsubst code/tools/%.c,$(BIN)/kernel/tools/%.c.o,$(KERNEL_SUPPORT_C))
 
 # 内核侧（freestanding，不能用 glibc；<string.h> 取自 code/tools）
 KCFLAGS   := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
@@ -94,6 +99,10 @@ $(BIN)/kernel/%.asm.o: code/kernel/%.asm
 	$(NASM) -f elf32 $< -o $@
 
 $(BIN)/kernel/%.c.o: code/kernel/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(KCFLAGS) -c $< -o $@
+
+$(BIN)/kernel/tools/%.c.o: code/tools/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(KCFLAGS) -c $< -o $@
 

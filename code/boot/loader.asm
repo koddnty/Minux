@@ -1,5 +1,7 @@
 LOADER_BASE_ADDR    equ 0x08000
-KERNEL_BASE_ADDR    equ 0x10000
+; repair: 原来是 0x10000，但内核 .bss(页位图 128KB) 会一直长到 0x36700，
+; repair: 把页目录 0x20000 / 页表 0x21000 / 专区根表 0x22000 全压掉。搬到 1MB。
+KERNEL_BASE_ADDR    equ 0x100000
 
 KERNEL_SECTOR_BEGIN equ 20h
 KERNEL_SECTOR_COUNT equ 010h
