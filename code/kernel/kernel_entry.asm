@@ -82,6 +82,10 @@ extern __bss_end
 global page_fault_entry
 extern miCorePageFaultHandler
 
+global enter_user_mode
+extern user_test
+
+
 KERNEL_STACK_SIZE equ 8192
 PROCESS_STACK_SIZE equ 8192
 
@@ -96,10 +100,14 @@ kernel_entry:
 
 
 ; 缺页中断处理函数入口
-; repair: 错误码 bit2 = U/S(0=内核态访问)。内核态缺页基本都是真 bug,
-; repair: 交给"按需分页"会一直补页形成风暴(调试时极难定位), 这里直接停住。
+; repair: 错误码 bit0 = P(1=页本来就存在, 是保护性缺页), bit2 = U/S(0=内核态访问)。
+; repair: 这两种都补不了页(按需分页只对 P=0 有意义), 交给 handler 只会疯狂重试成
+; repair: 缺页风暴。直接停住, 用 -d int 看第一条 v=0e 的错误码就能定位。
 page_fault_entry:
-    test byte [esp], 0x04
+    mov al, [esp]
+    test al, 0x01
+    jnz kernel_fault_panic
+    test al, 0x04
     jz kernel_fault_panic
 
     push ds
@@ -131,10 +139,44 @@ page_fault_entry:
     iretd
 
 
+; 系统调用入口
+syscall_entry:
+    push ds
+    push es
+    push fs
+    push gs
 
-; repair: 原来是 .reload_cs 这个"局部标签"，但它上面插进了 page_fault_entry 这个非局部
-; repair: 标签，于是 .reload_cs 挂到了 page_fault_entry 名下，kernel_entry.reload_cs 不存在
-; repair: （报 symbol `kernel_entry.reload_cs' not defined）。改成普通标签。
+    mov ax, SelectorKernelData32
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    pushad
+
+    cmp eax, 1
+    je syscall_exit
+
+    popad
+
+    pop gs
+    pop fs
+    pop es
+    pop ds
+
+    iretd
+
+
+syscall_exit:
+    mov byte [0xB8000], 'E'
+    mov byte [0xB8001], 0x07
+
+.exit:
+    cli
+    hlt
+    jmp .exit
+
+
 kernel_fault_panic:
     cli
     hlt
@@ -190,13 +232,58 @@ kernel_reload_cs:
 
 
     ; 缺页中断处理 ----------------------------------------
-    ; 进 kernel C
+    ; 进 kernel C(kernel_main 里会把用户页准备好, 再调 enter_user_mode 进用户态)
     call kernel_main
 
-.hang:
+    ; kernel_main 正常返回的话停在这里
+kernel_hang:
     cli
     hlt
-    jmp .hang
+    jmp kernel_hang
+
+
+; void enter_user_mode(uint32_t eip, uint32_t esp)
+;   repair: 原来是 push SelectorUserData32 / SelectorUserCode32 —— 选择子没带 RPL=3,
+;   repair: iret 弹 CS 时因为 CS.RPL==CPL 被当成同特权级返回: 只弹 3 项、CPL 仍是 0,
+;   repair: 根本没进 ring3。必须 |3(SS=0x23, CS=0x1B)。
+;   repair: EFLAGS 原来是 0x202(IF=1): PIT 的时钟中断一来, IDT 里 0x20 是空表项
+;   repair: → #GP → 13 号也空 → #DF → 三重故障重启。测试阶段先给 IF=0。
+global enter_user_mode
+enter_user_mode:
+    mov eax, [esp + 4]                  ; 用户代码入口
+    mov ecx, [esp + 8]                  ; 用户栈顶
+    cli
+
+    mov dx, SelectorUserData32 | 3      ; 用户数据段(RPL=3)
+    mov ds, dx
+    mov es, dx
+    mov fs, dx
+    mov gs, dx
+
+    push (SelectorUserData32 | 3)       ; SS     = 0x23
+    push ecx                            ; ESP    = 用户栈
+    push 0x2                            ; EFLAGS = IF=0(还没装时钟中断门)
+    push (SelectorUserCode32 | 3)       ; CS     = 0x1B
+    push eax                            ; EIP    = 用户代码
+    iretd
+
+
+; 用户态测试代码: 位置无关的一小段, 由 C 拷到用户页里执行
+;   ring3 不能用 hlt(特权指令, 会 #GP), 所以用死循环阻塞
+global user_code_start
+global user_code_end
+user_code_start:
+    mov ax, SelectorUserData32 | 3
+    mov es, ax
+    mov byte [es:0xB8010], 'U'          ; 直接写显存(那一页要给 U 权限)
+    mov byte [es:0xB8011], 0x07
+
+    mov eax, 1
+    int 0x80
+
+user_code_hang:
+    jmp user_code_hang
+user_code_end:
 
 
 
@@ -230,11 +317,9 @@ SelectorTSS             equ PM_DESC_TSS - PM_GDT
 
 
 ; IDT ----------------------------------------
-; repair: 原来写的是 dw page_fault_entry & 0FFFFh / >> 16 —— nasm 不允许对可重定位
-; repair: 的标签做 & 和 >>（报 "may only be applied to scalar values"），编不过。
-; repair: 改成先留 0，运行时代码里回填（见上面 lidt 之前那几行）。
 align 8
 IDT:
+    ; 缺页中断
     times 14 dq 0
     dw 0                    ; offset 15:0  运行时回填
     dw SelectorKernelCode32
@@ -242,6 +327,20 @@ IDT:
     db 10001110b
     dw 0                    ; offset 31:16 运行时回填
     times 241 dq 0
+
+        times (0x80 - 15) dq 0
+
+
+    times (0x80 - 15) dq 0
+
+    ; syscall
+    dw syscall_entry & 0FFFFh
+    dw SelectorKernelCode32
+    db 0
+    db 11101110b
+    dw syscall_entry >> 16
+
+    times (256 - 0x81) dq 0
 ; end of IDT
 IdtLen equ $ - IDT
 

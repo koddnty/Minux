@@ -126,6 +126,11 @@ void miCorePageMap(const uint32_t directory, uint32_t const virtual, uint32_t co
         miCoreInvalidatePage(virtual);
     } else {
         // PageTable 已经存在, 经专区取出它
+        // repair: 页表已存在时也要把 PDE 的 U 位补上 —— ring3 能不能访问由 PDE 和 PTE
+        // repair: 两级共同决定, 只要一级没 U 就会保护性缺页(错误码 P=1,U/S=1)。
+        if (flags & PAGE_USER) {
+            page_directory[directory_index] |= PAGE_USER;
+        }
         page_table = (uint32_t*)(PAGE_TABLE_WINDOW_BEGIN + mi_core_table_slot[directory_index] * PAGE_SIZE);
     }
 
