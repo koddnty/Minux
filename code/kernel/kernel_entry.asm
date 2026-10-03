@@ -78,6 +78,10 @@ extern kernel_main
 extern __bss_start
 extern __bss_end
 
+; 缺页中断
+global page_fault_entry
+extern miCorePageFaultHandler
+
 KERNEL_STACK_SIZE equ 8192
 PROCESS_STACK_SIZE equ 8192
 
@@ -89,6 +93,39 @@ kernel_entry:
     ; 1) 加载自己的 GDT，然后远跳转重载 CS
     lgdt [GdtPtr]
     jmp SelectorKernelCode32:.reload_cs
+
+
+; 缺页中断处理函数入口
+page_fault_entry:
+    push ds
+    push es
+    push fs
+    push gs
+
+    mov ax, SelectorKernelData32
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    pushad
+
+    mov eax, cr2
+    push eax
+    call miCorePageFaultHandler
+    add esp, 4
+
+    popad
+
+    pop gs
+    pop fs
+    pop es
+    pop ds
+
+    add esp, 4
+    iretd
+
+
 
 .reload_cs:
     ; 2) 数据段全部拉平（基址 0、界限 4G）
@@ -110,6 +147,8 @@ kernel_entry:
     xor eax, eax
     rep stosb
 
+
+    ; TSS 处理    ----------------------------------------
     ; 初始化tss位置
     mov eax, tss
     mov word [PM_DESC_TSS + 2], ax
@@ -124,7 +163,13 @@ kernel_entry:
     ; 加载tss
     mov ax, SelectorTSS
     ltr ax
-    ; 5) 进 C
+
+    lidt [IdtPtr]
+
+
+
+    ; 缺页中断处理 ----------------------------------------
+    ; 进 kernel C
     call kernel_main
 
 .hang:
@@ -159,6 +204,26 @@ SelectorKernelData32    equ PM_DESC_KERNEL_DATA32  - PM_GDT
 SelectorUserCode32      equ PM_DESC_USER_CODE32  - PM_GDT
 SelectorUserData32      equ PM_DESC_USER_DATA32  - PM_GDT
 SelectorTSS             equ PM_DESC_TSS - PM_GDT
+
+
+
+
+; IDT ----------------------------------------
+align 8
+IDT:
+    times 14 dq 0
+    dw page_fault_entry & 0FFFFh
+    dw SelectorKernelCode32
+    db 0
+    db 10001110b
+    dw page_fault_entry >> 16
+    times 241 dq 0
+; end of IDT
+IdtLen equ $ - IDT
+
+IdtPtr:
+    dw IdtLen - 1
+    dd IDT
 
 
 

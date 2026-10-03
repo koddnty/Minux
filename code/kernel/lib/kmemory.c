@@ -6,12 +6,32 @@
 // 内存映射map
 static uint32_t mi_core_memory_bit_map [MI_CORE_MEMORY_TOTAL_SIZE]; // 2 * 5 * 3 * 2K = 2^12 K = 4G 单位4K
 static size_t mi_core_memory_min_begin_alloc = 0;           // 最小位可用内存
+static uint32_t mi_core_min_begin_virtual_table_alloc = 0;      // 单位为table个数。
 
 #include "kmemory.h"
 
 #define PAGE_PRESENT 0x001
 #define PAGE_WRITE   0x002
 #define PAGE_USER    0x004
+
+void miCorePageFaultHandler(uint32_t fault_addr) {
+    uint32_t virtual_addr =
+        fault_addr & ~(MI_CORE_PAGE_SIZE - 1);
+
+    uint32_t physical_addr =
+        miCoreMemoryAllocPage();
+
+    if (physical_addr == 0) {
+        while (1);
+    }
+
+    miCorePageMap(
+        miCoreGetCR3(),
+        virtual_addr,
+        physical_addr,
+        PAGE_PRESENT | PAGE_WRITE | PAGE_USER
+    );
+}
 
 // 建立虚拟地址到物理地址的映射
 void miCorePageMap(const uint32_t directory, uint32_t const virtual, uint32_t const physical, uint32_t const flags) {

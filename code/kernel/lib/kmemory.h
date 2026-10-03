@@ -8,10 +8,25 @@
 
 
 #define PAGE_DIRECTORY_ADDR 0x20000
-#define PAGE_TABLE_ADDR     0x21000
 
+#define PAGE_TABLE_ADDR     0x22000     // 900MB开头的页表
+#define PAGE_TABLE_WINDOW_BEGIN 0x38400000
+#define PAGE_TABLE_WINDOW_END   0x40000000
+#define PAGE_SIZE               0x1000
+#define PAGE_TABLE_VIRTUAL_SIZE 0x400000
+
+extern uint32_t miCoreGetCR2(void);
+extern uint32_t miCoreGetCR3(void);
+extern void miCoreLoadCR3(uint32_t cr3);
+extern void miCoreInvalidatePage(uint32_t addr);
 
 // 汇编api    --------------------------------------------------
+// 中断处理入口
+void miCorePageFaultHandler(uint32_t fault_addr);
+
+
+
+// C kernel 系统调用
 // 虚拟-物理地址映射建立
 void miCorePageMap(uint32_t directory, uint32_t virtual, uint32_t physical, uint32_t flags);
 

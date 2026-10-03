@@ -4,13 +4,14 @@
 #include "lib/kprintf.h"
 #include <stdbool.h>
 #include <stdint.h>
-
+#include "lib/kmemory.h"
 
 
 int kernel_main(void) {
     kVagprintf("success: init gdt\n");
-    kVagprintf("success: init virtual memory\n");
     kVagprintf("success: init tss\n");
-    kVagprintf("Loading kernel...\n");
+    miCoreMemoryInit();     // 初始化虚拟内存
+    kVagprintf("success: init virtual memory\n");
+
     return 0;
 }
