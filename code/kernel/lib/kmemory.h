@@ -1,8 +1,29 @@
-//
-// Created by koddnty on 2026/10/2.
-//
+#pragma once
+#include <stdint.h>
+#include <string.h>
 
-#ifndef MINUX_KMEMORY_H
-#define MINUX_KMEMORY_H
+#define  MI_CORE_MEMORY_TOTAL_SIZE 32768
+#define  MI_CORE_INIT_MEMORY_SIZE 1024
+#define MI_CORE_PAGE_SIZE 4096
 
-#endif //MINUX_KMEMORY_H
+
+#define PAGE_DIRECTORY_ADDR 0x20000
+#define PAGE_TABLE_ADDR     0x21000
+
+
+// 汇编api    --------------------------------------------------
+// 虚拟-物理地址映射建立
+void miCorePageMap(uint32_t directory, uint32_t virtual, uint32_t physical, uint32_t flags);
+
+// 虚拟-物理地址映射删除
+void miCorePageMapErase(uint32_t directory, uint32_t virtual);
+
+// 初始化汇编已占用内存
+int miCoreMemoryInit();
+
+// 分配物理内存页, 0失败， 其他为地址
+uint32_t miCoreMemoryAllocPage();
+
+// 释放物理内存页, 0成功， -1失败
+int miCoreMemoryFreePage(uint32_t addr);
+

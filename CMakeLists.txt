@@ -13,6 +13,7 @@ add_executable(minux_index
     code/tools/cstring.c
     code/kernel/lib/kprintf.c
     code/kernel/main.c
+    code/kernel/lib/kmemory.c
     host/fsSys.c
     host/copyFs.c
     host/build.c
