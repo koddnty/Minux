@@ -8,7 +8,9 @@
 
 
 int kernel_main(void) {
+    kVagprintf("success: init gdt\n");
+    kVagprintf("success: init virtual memory\n");
+    kVagprintf("success: init tss\n");
     kVagprintf("Loading kernel...\n");
-
     return 0;
 }
