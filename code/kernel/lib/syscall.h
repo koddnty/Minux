@@ -8,4 +8,4 @@
 #endif //MINUX_SYSCALL_H
 
 
-int mi_core_syscall_route(int code);
+void write(const char* c);

@@ -26,30 +26,48 @@ CC      := gcc
 LD      := ld
 OBJCOPY := objcopy
 
+SHELL   := /bin/bash     # check-entry 里用了 $((16#..))，dash 不认
+
+ROOT    := $(CURDIR)/..
+
 BIN     := bin
 
 # 用户程序链接地址, 必须和 code/kernel/lib/kfork.h 的 USER_CODE_VADDR 一致
 USER_BASE := 0x400000
 
+# 用户侧运行时: write() 这类系统调用包装。它是【用户程序】的一部分,
+# 内核里那份编进去只是顺带（内核自己用 kVprintf），所以这里必须单独链进来,
+# 否则 hellominux.c 里的 write() 会 undefined reference。
+USER_RUNTIME_SRC := $(ROOT)/code/kernel/lib/syscall.c
+
 # 测试 C 代码: 没有 libc（内核只提供 code/tools/cstring.c 那几个函数）
+#   -I $(ROOT)/code 是为了让测试代码能 #include "kernel/lib/syscall.h"
 TCFLAGS := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
-           -fno-asynchronous-unwind-tables -O2 -Wall
+           -fno-asynchronous-unwind-tables -O2 -Wall -I $(ROOT)/code
 
 # 每个名字一个测试程序, 产物 bin/<名字>.bin
 PROGS   := hellominux
 BINS    := $(addprefix $(BIN)/,$(addsuffix .bin,$(PROGS)))
 
-.PHONY: all clean list
+# 每个程序的 C 源（存在才有）。注意不能在模式规则里写 $(wildcard %.c) ——
+# 那里 % 是字面量, 展开出来是 "%.c" 这个不存在的文件名, 依赖就丢了,
+# 改 .c 之后 make 不会重编。所以在这里用已知的 PROGS 显式列出来,
+# 代价是改任意一个 .c 会重编全部测试程序（数量少, 无所谓）。
+PROG_C  := $(wildcard $(addsuffix .c,$(PROGS)))
+
+.PHONY: all clean list check-entry
 
 all: $(BINS)
 
-# <名字>.asm [+ <名字>.c] -> 链接 -> objcopy 出裸二进制
+# <名字>.asm [+ <名字>.c] + 用户侧运行时 -> 链接 -> objcopy 出裸二进制
 #   有 <名字>.c 就一起编进去, 没有就只链 asm。
-$(BIN)/%.bin: %.asm test.ld | $(BIN)
+$(BIN)/%.bin: %.asm test.ld $(PROG_C) $(USER_RUNTIME_SRC) | $(BIN)
 	@mkdir -p $(BIN)
 	@set -e; \
-	objs="$(BIN)/$*.asm.o"; \
 	$(NASM) -f elf32 $< -o $(BIN)/$*.asm.o; \
+	objs="$(BIN)/$*.asm.o"; \
+	$(CC) $(TCFLAGS) -c $(USER_RUNTIME_SRC) -o $(BIN)/$*.runtime.o; \
+	objs="$$objs $(BIN)/$*.runtime.o"; \
 	if [ -f "$*.c" ]; then \
 	    $(CC) $(TCFLAGS) -c $*.c -o $(BIN)/$*.c.o; \
 	    objs="$$objs $(BIN)/$*.c.o"; \
@@ -57,6 +75,20 @@ $(BIN)/%.bin: %.asm test.ld | $(BIN)
 	$(LD) -m elf_i386 -T test.ld -o $(BIN)/$*.elf $$objs; \
 	$(OBJCOPY) -O binary $(BIN)/$*.elf $@; \
 	echo "  测试程序 $@: $$(stat -c %s $@) 字节"
+
+# 检查产物是不是【偏移 0 就是入口】的裸二进制
+#   miCoreProgramLoader 是硬性假设这个的; 一旦有人改成直接 ld 出 ELF, 这里会拦住。
+check-entry: $(BINS)
+	@set -e; for b in $(BINS); do \
+	    e=$$(nm $(BIN)/$$(basename $$b .bin).elf | awk '/ T _start$$/ {print $$1}'); \
+	    if [ "$$((16#$$e))" != "$$((16#400000))" ]; then \
+	        echo "$$b: _start 在 0x$$e, 不是 0x400000 —— test.ld 的 . = 0x400000 被改过了?"; exit 1; \
+	    fi; \
+	    if xxd -l 4 $$b | grep -q "7f45 4c46"; then \
+	        echo "$$b: 是 ELF 不是裸二进制, miCoreProgramLoader 跑不了它"; exit 1; \
+	    fi; \
+	    echo "  $$b: _start@0x400000, 裸二进制 OK"; \
+	done
 
 # 看看某个程序里都有什么符号（排查入口没在偏移 0 很有用）
 list: $(BINS)

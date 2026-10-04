@@ -155,3 +155,8 @@ void kVagprintf(const char* fmt, ...) {
 
     va_end(ap);
 }
+
+
+void kernel_write(const char* str) {
+    kVagprintf("%s", str);
+}

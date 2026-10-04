@@ -12,3 +12,5 @@ void kVagputc(char c);
 
 /* 支持 %c %s %d %u %x %% 和 \n（换行 + 回车） */
 void kVagprintf(const char* fmt, ...);
+
+void kernel_write(const char* str);

@@ -19,5 +19,6 @@ add_executable(minux_index
     host/build.c
     test/print.c
         code/kernel/lib/kfork.c
+        test/hellominux.c
 )
 
