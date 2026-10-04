@@ -1,6 +1,7 @@
 #include "fsSys.h"
 #include "minFs/fsTree.h"
 #include "copyFs.h"
+#include "test_build.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -72,6 +73,13 @@ int main(int argc, char** argv) {
     int rt = miCopyFile(kernel_path, "/root/kernel", SECTOR_KERNEL, "kernel");
     if (rt) {
         printf("failed to create /root/kernel/kernel\n");
+        miDiskClose();
+        return 1;
+    }
+
+    /* 测试程序装进 /test/（实现在 host/test_build.c，同一个 miDiskOpen 会话里做完） */
+    printf("copy test programs...\n");
+    if (miTestBuildInstall() != 0) {
         miDiskClose();
         return 1;
     }

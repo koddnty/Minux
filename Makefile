@@ -1,11 +1,12 @@
 # ============================================================================
 #  Minux 构建入口
 #
-#    make            只编译（MBR / loader / kernel / host 工具），不碰磁盘
-#    make build      重新构建磁盘镜像（清零 + dd 引导链 + 建文件系统）⚠ 会清掉手动加的文件
+#    make            只编译（MBR / loader / kernel / host 工具 / test 里的测试程序），不碰磁盘
+#    make build      重新构建磁盘镜像（清零 + dd 引导链 + 建文件系统 + 装入 /test 里的测试程序）⚠ 会清掉手动加的文件
 #    make run        用【当前】磁盘启动 QEMU（不重建，保留你手动增量加的文件）
 #    make debug      同上，带异常日志（qemu.log）
 #    make tools      只编宿主机侧工具（host/*.c → bin/*）
+#    make test       只编 test/ 下的测试程序（裸二进制，产物 test/bin/*.bin）
 #    make fs         只重建文件系统部分（引导链不动）
 #    make kernel-src 列出内核会编哪些文件 / include 路径
 #    make clean      删掉编译产物
@@ -26,11 +27,14 @@ BIN            := bin
 
 # 磁盘布局：只在这里写一次 ----------------------------------------
 #   loader.asm 里的 LOADER_START_SECTOR / KERNEL_SECTOR_BEGIN / KERNEL_SECTOR_COUNT
-#   必须和下面这几个值一致，make check 会替你核对。
+#   必须和下面这几个值一致（check 目标已经不在了，只能靠手动对齐）。
+#
+#   repair: KERNEL_SECTORS 必须 >= ceil(kernel.bin 字节数 / 512)，否则 loader 读到的
+#   repair: 是半个内核，表现是进内核后随机跑飞。加完新模块记得看一眼 bin/kernel.bin 大小。
 SECTOR_MBR     := 0
 SECTOR_LOADER  := 3
 SECTOR_KERNEL  := 32
-KERNEL_SECTORS := 16
+KERNEL_SECTORS := 32
 KERNEL_BASE    := 0x100000
 IMAGE_MB       := 128
 
@@ -51,6 +55,13 @@ KERNEL_ASM  := $(shell find code/kernel -name '*.asm')
 # repair: 之前 .asm.o 规则只依赖 .asm 自己，加个 .inc 进去 make 不会重编。
 KERNEL_ASM_INC := $(shell find code/kernel -name '*.inc')
 
+# 内核也要用的 minFs 部分：文件系统树 + 磁盘读扇区（miCoreProgramLoader 要从盘上读程序）。
+#   fsTree.c 里写的是 #include <string.h>，靠 KCFLAGS 里的 -I code/tools 换成内核那份，
+#   实现由 code/tools/cstring.c 提供（strcpy/strcmp/strlen/memcpy/memset），所以它一行不用改。
+#   readSector.asm 提供内核侧的 miReadSector / miWriteSector（宿主侧那份在 host/fsSys.c）。
+KERNEL_FS_C   := code/minFs/fsTree.c
+KERNEL_FS_ASM := code/minFs/readSector.asm
+
 # 每个内核子目录都进 include 路径，代码里可以直接 #include "kprintf.h"
 # repair: 原来写的是 $(dir $(shell find … -type d))，而 $(dir) 是"取文件所在目录"的，
 # repair: 对目录用它会把最后一段吃掉（code/kernel/lib → code/kernel/），子目录其实没进搜索路径。
@@ -61,7 +72,9 @@ KERNEL_INC  := $(sort $(addsuffix /,$(shell find code/kernel -type d)))
 KERNEL_SUPPORT_C := code/tools/cstring.c
 
 KERNEL_OBJS := $(patsubst code/kernel/%.asm,$(BIN)/kernel/%.asm.o,$(KERNEL_ASM)) \
+               $(patsubst code/minFs/%.asm,$(BIN)/kernel/minFs/%.asm.o,$(KERNEL_FS_ASM)) \
                $(patsubst code/kernel/%.c,$(BIN)/kernel/%.c.o,$(KERNEL_C)) \
+               $(patsubst code/minFs/%.c,$(BIN)/kernel/minFs/%.c.o,$(KERNEL_FS_C)) \
                $(patsubst code/tools/%.c,$(BIN)/kernel/tools/%.c.o,$(KERNEL_SUPPORT_C))
 
 # 内核侧（freestanding，不能用 glibc；<string.h> 取自 code/tools）
@@ -69,14 +82,24 @@ KCFLAGS   := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
              -fno-asynchronous-unwind-tables -I code -I code/tools \
              $(addprefix -I ,$(KERNEL_INC))
 
-HOST_SUPPORT := host/fsSys.c host/copyFs.c       # 公共实现（没有 main，不单独编成工具）
+# test_build.c 是【库】(没有 main)，由 build.c 调用，所以不能当工具单独编
+HOST_SUPPORT := host/fsSys.c host/copyFs.c host/test_build.c
 HOST_SRCS  := $(filter-out $(HOST_SUPPORT),$(wildcard host/*.c))
 HOST_TOOLS := $(patsubst host/%.c,$(BIN)/%,$(HOST_SRCS))
 
-.PHONY: all build run debug tools fs check clean help kernel-src check-image
+.PHONY: all build run debug tools fs check clean help kernel-src check-image test-progs test
 
 # 默认目标：只编译，不动磁盘（所以你别怕 make 一下就把盘里的文件冲了）
-all: $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin $(HOST_TOOLS)
+all: $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/kernel.bin $(HOST_TOOLS) test-progs
+
+# ---------------------------------------------------------------------------
+# 测试程序（test/ 有自己的 Makefile，产物 test/bin/<名字>.bin 是【裸二进制】）
+#   顶层只负责转调；build 依赖 all，所以跑 make build 时它一定先编好。
+# ---------------------------------------------------------------------------
+test-progs:
+	@$(MAKE) --no-print-directory -C test
+
+test: test-progs
 
 # ---------------------------------------------------------------------------
 # 引导链
@@ -110,6 +133,16 @@ $(BIN)/kernel/%.c.o: code/kernel/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(KCFLAGS) -c $< -o $@
 
+# minFs 也编进内核（上面 KERNEL_FS_C / KERNEL_FS_ASM），规则和 code/kernel 那两条一样，
+# 只是源码在 code/minFs 下，单独写两条；产物照样按目录结构落到 bin/kernel/minFs/。
+$(BIN)/kernel/minFs/%.asm.o: code/minFs/%.asm $(KERNEL_ASM_INC)
+	@mkdir -p $(dir $@)
+	$(NASM) -f elf32 $(addprefix -I,$(KERNEL_INC)) $< -o $@
+
+$(BIN)/kernel/minFs/%.c.o: code/minFs/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(KCFLAGS) -c $< -o $@
+
 $(BIN)/kernel/tools/%.c.o: code/tools/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(KCFLAGS) -c $< -o $@
@@ -117,11 +150,23 @@ $(BIN)/kernel/tools/%.c.o: code/tools/%.c
 $(BIN)/kernel.bin: $(KERNEL_OBJS) code/kernel/kernel.ld | $(BIN)
 	ld -m elf_i386 -T code/kernel/kernel.ld -o $(BIN)/kernel.elf $(KERNEL_OBJS)
 	objcopy -O binary $(BIN)/kernel.elf $@
+	@# repair: 内核超过 loader 能读的扇区数会被【静默截断】(现象是进内核后随机跑飞，
+	@# repair: 不是明显报错)，所以在编译期就拦下来，并打印实际占用。
+	@sz=$$(stat -c %s $@); max=$$(( $(KERNEL_SECTORS) * 512 )); \
+	 if [ $$sz -gt $$max ]; then \
+	   echo "错误: $@ 有 $$sz 字节，超过 loader 的 $(KERNEL_SECTORS) 扇区($$max 字节)上限"; \
+	   echo "      改大时要同时改 code/boot/loader.asm 的 KERNEL_SECTOR_COUNT 和这里"; \
+	   echo "      的 KERNEL_SECTORS（两边必须一致），然后 make build"; \
+	   exit 1; \
+	 fi; \
+	 echo "内核大小: $$sz / $$max 字节 (用了 $$(( (sz + 511) / 512 )) / $(KERNEL_SECTORS) 扇区)"
 
 # 列出内核实际会编哪些文件（排查"文件没被编进去"很有用）
 kernel-src:
-	@echo "内核 C   源文件:"; for f in $(KERNEL_C);   do echo "  $$f"; done
-	@echo "内核 asm 源文件:"; for f in $(KERNEL_ASM); do echo "  $$f"; done
+	@echo "内核 C   源文件:"; for f in $(KERNEL_C);     do echo "  $$f"; done
+	@echo "内核 asm 源文件:"; for f in $(KERNEL_ASM);   do echo "  $$f"; done
+	@echo "minFs   源文件:"; for f in $(KERNEL_FS_C) $(KERNEL_FS_ASM); do echo "  $$f"; done
+	@echo "libc    子集:";   for f in $(KERNEL_SUPPORT_C); do echo "  $$f"; done
 	@echo "asm 共享片段:";   for f in $(KERNEL_ASM_INC); do echo "  $$f"; done
 	@echo "include 路径:";    for f in $(KERNEL_INC); do echo "  $$f"; done
 
@@ -178,6 +223,7 @@ clean:
 	rm -f $(BIN)/MBR.bin $(BIN)/loader.bin $(BIN)/loader.o $(BIN)/loader.elf \
 	      $(BIN)/kernel.bin $(BIN)/kernel.elf $(HOST_TOOLS) qemu.log
 	rm -rf $(BIN)/kernel
+	@$(MAKE) --no-print-directory -C test clean
 
 # ---------------------------------------------------------------------------
 # 布局自检：Makefile 和 asm 里的三组常量必须对得上（以前踩过好几次）
@@ -185,7 +231,7 @@ clean:
 # ---------------------------------------------------------------------------
 
 help:
-	@sed -n '2,18p' Makefile | sed 's/^# \{0,1\}//'
+	@sed -n '2,19p' Makefile | sed 's/^# \{0,1\}//'
 	@echo ""
 	@echo "当前布局：镜像=$(IMAGE)"
 	@echo "  MBR@$(SECTOR_MBR)  loader@$(SECTOR_LOADER)  kernel@$(SECTOR_KERNEL)（$(KERNEL_SECTORS) 扇区，加载到 $(KERNEL_BASE)）"

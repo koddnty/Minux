@@ -314,7 +314,6 @@ static void cmdPut(const char* local, const char* remote) {
 static void cmdCat(const char* path) {
     char abs[256];
     char* buf;
-    uint32_t size;
     int got;
 
     if (!path || !*path) {
@@ -330,11 +329,11 @@ static void cmdCat(const char* path) {
         return;
     }
 
-    size = CAT_BUF_SIZE;
-    got = miCoreReadFile(abs, buf, &size);       /* 成功返回字节数（>=0），失败 -1 */
+    /* repair: miCoreReadFile 现在要 offset + 缓冲区容量两个参数, 返回真正读到的字节数 */
+    got = miCoreReadFile(abs, buf, 0, CAT_BUF_SIZE);
 
     if (got < 0) {
-        printf("cat: 读不到 %s（不存在 / 是目录 / 缓冲区不够）\n", abs);
+        printf("cat: 读不到 %s（不存在 / 是目录）\n", abs);
         free(buf);
         return;
     }

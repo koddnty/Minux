@@ -222,18 +222,16 @@ int miCoreMakeDir(char* path, char* name, uint32_t sector) {
     return 0;
 }
 
-// repair: 原来只把文件长度写回 *buffer_size，数据一个字节都没读（下面那句注释 "从 node.begin[idx] 读取文件" 是空的）。
-// repair: 现在真的把内容读进 buffer，并按新约定返回读到的字节数（>=0），失败 -1。
-// repair: buffer_size 是「入参=容量、出参=实际长度」，容量不够返回 -1，不会写越界。
-int miCoreReadFile(char* path, char* buffer, uint32_t* buffer_size) {
+
+// repair: 加了 offset(从文件第几字节开始读); buffer_size 现在只表示"缓冲区能装多少",
+// repair: 不再是"入参容量/出参长度"的进出参, 实际读到多少字节由返回值给出。
+int miCoreReadFile(char* path, char* buffer, uint32_t offset, uint32_t buffer_size) {
     uint32_t selector = FS_ROOT_SECTOR;
     struct FsTreeNode node = {};
 
-    if (path == NULL || buffer == NULL || buffer_size == NULL) {
+    if (path == NULL || buffer == NULL) {
         return -1;
     }
-
-    uint32_t capacity = *buffer_size;
 
     // 路径解析
     char path_buffer[FS_MAX_CHILD][FS_NAME_LEN];
@@ -262,30 +260,36 @@ int miCoreReadFile(char* path, char* buffer, uint32_t* buffer_size) {
             uint32_t file_size = node.length[idx];
             uint32_t begin = node.begin[idx];
 
-            if (file_size > capacity) {
-                return -1;              // 调用方的缓冲区装不下
+            if (offset >= file_size) {
+                return 0;               // repair: 起点已在文件尾之后, 一个字节都读不到
             }
 
-            // 一个扇区一个扇区地读，最后一块只拷贝 file_size 需要的部分
+            // repair: 能读的上限 = 文件剩余字节数, 再被调用方给的缓冲区容量卡一次
+            uint32_t remain_in_file = file_size - offset;
+            uint32_t need = remain_in_file < buffer_size ? remain_in_file : buffer_size;
+
             char sector_buffer[FS_SECTOR_SIZE];
             uint32_t done = 0;
-            uint32_t sector_count = (file_size + FS_SECTOR_SIZE - 1) / FS_SECTOR_SIZE;
 
-            for (uint32_t i = 0; i < sector_count; i++) {
-                if (miReadSector(begin + i, sector_buffer, 1) != 0) {
+            // repair: offset 可能落在扇区中间, 所以每轮只拷该扇区里该拷的那一段
+            while (done < need) {
+                uint32_t pos = offset + done;                   // 文件内偏移
+                uint32_t in_sector = pos % FS_SECTOR_SIZE;      // 落在扇区里的位置
+
+                if (miReadSector(begin + pos / FS_SECTOR_SIZE, sector_buffer, 1) != 0) {
                     return -1;
                 }
 
-                uint32_t remain = file_size - done;
-                uint32_t copy_size = remain > FS_SECTOR_SIZE ? FS_SECTOR_SIZE : remain;
+                uint32_t chunk = FS_SECTOR_SIZE - in_sector;
+                if (chunk > need - done) {
+                    chunk = need - done;
+                }
 
-                memcpy(buffer + done, sector_buffer, copy_size);
-                done += copy_size;
+                memcpy(buffer + done, sector_buffer + in_sector, chunk);
+                done += chunk;
             }
 
-            *buffer_size = file_size;
-
-            return (int)file_size;      // 成功：返回读到的字节数
+            return (int)done;       // 成功：返回实际读到的字节数（可能小于 buffer_size）
         }
 
         if (node.type[idx] != 'd') {

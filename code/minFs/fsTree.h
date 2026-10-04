@@ -55,13 +55,15 @@ int miCoreMakeDir(char* path, char* name, uint32_t sector);
 
 /**
  * @brief 读取文件内容
+ * @param path        文件路径
  * @param buffer      输出缓冲区
- * @param buffer_size 入参=缓冲区容量；出参=实际读到的字节数
- * @return 成功：读到的字节数（>=0）；失败：-1
+ * @param offset      从文件第 offset 字节开始读（0 = 从头读）
+ * @param buffer_size 缓冲区容量；只表示"能装多少"，不表示"要读多少"
+ * @return 成功：实际读到的字节数（>=0；读到文件尾就是 0，可能小于 buffer_size）；失败：-1
  * @note 读到的是原始字节，不会自动补 '\0'。要当字符串用，请自己保证
- *       buffer_size >= 文件长度+1 并把最后一个字节置 0。
+ *       buffer 至少留一个字节并置 0。
  */
-int miCoreReadFile(char* path, char* buffer, uint32_t* buffer_size);
+int miCoreReadFile(char* path, char* buffer, uint32_t offset, uint32_t buffer_size);
 
 
 /**
