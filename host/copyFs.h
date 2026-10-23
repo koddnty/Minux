@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdio.h>      /* repair: 原来是 <c++/13/cstdio>（C++ 头），gcc 编 C 会 fatal error */
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "minFs/fsTree.h"

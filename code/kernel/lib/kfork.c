@@ -94,16 +94,6 @@ void miCoreProgramLoader(const char* path) {
         PAGE_PRESENT | PAGE_WRITE | PAGE_USER
     );
 
-    // repair: 还得把显存也建成 U/S=1。loader 建的 0~4MB 恒等映射是内核专属(U=0),
-    // repair: 只给代码页和栈页开 U 的话, 用户程序一写 0xB8000 就是保护性缺页(P=1),
-    // repair: 会被 page_fault_entry 直接停机 —— 程序就完全没法输出任何东西。
-    miCorePageMap(
-        cr3,
-        USER_VIDEO_VADDR,
-        USER_VIDEO_VADDR,
-        PAGE_PRESENT | PAGE_WRITE | PAGE_USER
-    );
-
     kVagprintf(
         "load user program: %s, size=%u, entry=0x%x, stack=0x%x\n",
         path,

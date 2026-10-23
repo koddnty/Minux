@@ -97,7 +97,7 @@ kernel_entry:
     cli
     cld
 
-    ; 1) 加载自己的 GDT，然后远跳转重载 CS
+    ; 加载自己的 GDT，然后远跳转重载 CS
     lgdt [GdtPtr]
     jmp SelectorKernelCode32:kernel_reload_cs
 
@@ -199,9 +199,6 @@ kernel_reload_cs:
 
     lidt [IdtPtr]
 
-
-
-    ; 缺页中断处理 ----------------------------------------
     ; 进 kernel C(kernel_main 里会把用户页准备好, 再调 enter_user_mode 进用户态)
     call kernel_main
 
@@ -213,7 +210,6 @@ kernel_hang:
 
 
 ; void enter_user_mode(uint32_t eip, uint32_t esp)
-global enter_user_mode
 enter_user_mode:
     mov eax, [esp + 4]                  ; 用户代码入口
     mov ecx, [esp + 8]                  ; 用户栈顶

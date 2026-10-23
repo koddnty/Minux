@@ -23,7 +23,7 @@ struct FsTreeNode {
     uint32_t child_count;                         // 目录文件个数
     char name[FS_MAX_CHILD][FS_NAME_LEN];       // 字符串指针，存储子节点的名称
     uint32_t begin[FS_MAX_CHILD];                 // 子节点扇区起始
-    uint32_t length[FS_MAX_CHILD];                 // 子节点扇区起始
+    uint32_t length[FS_MAX_CHILD];                 // 文件长度（字节
     char type[FS_MAX_CHILD];                    // 类型 f（文件, d（目录
 };
 

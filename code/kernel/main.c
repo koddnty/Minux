@@ -10,8 +10,6 @@
 
 
 int kernel_main(void) {
-    uint32_t cr3 = miCoreGetCR3();
-
     kVagprintf("success: init gdt\n");
     kVagprintf("success: init tss\n");
     miCoreMemoryInit();     // 初始化虚拟内存

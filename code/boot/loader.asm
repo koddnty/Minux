@@ -1,12 +1,6 @@
 LOADER_BASE_ADDR    equ 0x08000
-; repair: 原来是 0x10000，但内核 .bss(页位图 128KB) 会一直长到 0x36700，
-; repair: 把页目录 0x20000 / 页表 0x21000 / 专区根表 0x22000 全压掉。搬到 1MB。
 KERNEL_BASE_ADDR    equ 0x100000
-
 KERNEL_SECTOR_BEGIN equ 20h
-; repair: 原来只读 010h(16 扇区 = 8KB)。内核链进 minFs(fsTree.c + readSector.asm) 之后
-; repair: 超过 8KB 了(约 9.5KB)，读不下会被截断成半个内核。放到 020h(32 扇区 = 16KB)。
-; repair: 多读出来的部分落在内核 .bss 里，kernel_entry 进来第一件事就是 rep stosb 清 .bss，无副作用。
 KERNEL_SECTOR_COUNT equ 020h
 
 

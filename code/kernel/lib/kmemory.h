@@ -50,3 +50,7 @@ uint32_t miCoreMemoryAllocPage();
 
 // 释放物理内存页, 0成功， -1失败
 int miCoreMemoryFreePage(uint32_t addr);
+
+
+// 虚拟内存管理 ----------------------------------------
+
