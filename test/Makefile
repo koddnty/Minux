@@ -32,16 +32,16 @@ ROOT    := $(CURDIR)/..
 
 BIN     := bin
 
-# 用户程序链接地址, 必须和 code/kernel/lib/kfork.h 的 USER_CODE_VADDR 一致
+# 用户程序链接地址, 必须和 code/kernel/proc/kfork.h 的 USER_CODE_VADDR 一致
 USER_BASE := 0x400000
 
 # 用户侧运行时: write() 这类系统调用包装。它是【用户程序】的一部分,
 # 内核里那份编进去只是顺带（内核自己用 kVprintf），所以这里必须单独链进来,
 # 否则 hellominux.c 里的 write() 会 undefined reference。
-USER_RUNTIME_SRC := $(ROOT)/code/kernel/lib/syscall.c
+USER_RUNTIME_SRC := $(ROOT)/code/kernel/syscall/syscall.c
 
 # 测试 C 代码: 没有 libc（内核只提供 code/tools/cstring.c 那几个函数）
-#   -I $(ROOT)/code 是为了让测试代码能 #include "kernel/lib/syscall.h"
+#   -I $(ROOT)/code 是为了让测试代码能 #include "kernel/syscall/syscall.h"
 TCFLAGS := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
            -fno-asynchronous-unwind-tables -O2 -Wall -I $(ROOT)/code
 

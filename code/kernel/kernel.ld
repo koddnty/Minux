@@ -17,8 +17,9 @@ SECTIONS
     . = 0x100000;      /* 必须和 loader.asm 的 KERNEL_BASE_ADDR 一致 */
 
     .text : {
+        *(.text.entry)   /* kernel_entry 必须放在 0x100000, loader 直接跳这里 */
         *(.text*)
-        *(.code32*)      /* lib/kmemory.asm 用的是 [section .code32]，归到 .text 里 */
+        *(.code32*)      /* memory/kmemory.asm 用的是 [section .code32]，归到 .text 里 */
     }
 
     .rodata : {

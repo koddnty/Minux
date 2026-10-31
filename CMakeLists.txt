@@ -11,15 +11,14 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/code/tools)
 add_executable(minux_index
     code/minFs/fsTree.c
     code/tools/cstring.c
-    code/kernel/lib/kprintf.c
+    code/kernel/syscall/kprintf.c
     code/kernel/main.c
-    code/kernel/lib/kmemory.c
+    code/kernel/memory/kmemory.c
     host/fsSys.c
     host/copyFs.c
     host/build.c
     test/print.c
-        code/kernel/lib/kfork.c
+        code/kernel/proc/kfork.c
         test/hellominux.c
-        code/kernel/process.c
 )
 

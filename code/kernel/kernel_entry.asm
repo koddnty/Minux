@@ -92,7 +92,9 @@ extern user_test
 KERNEL_STACK_SIZE equ 8192
 PROCESS_STACK_SIZE equ 8192
 
-[SECTION .text]
+; 单独放一个段, 由链接脚本排到 0x100000 最前面
+; loader 是硬跳到 KERNEL_BASE_ADDR 的, 这里必须是内核的第一条指令
+[SECTION .text.entry]
 kernel_entry:
     cli
     cld
@@ -102,6 +104,7 @@ kernel_entry:
     jmp SelectorKernelCode32:kernel_reload_cs
 
 
+[SECTION .text]
 ; 缺页中断处理函数入口
 ; repair: 错误码 bit0 = P(1=页本来就存在, 是保护性缺页), bit2 = U/S(0=内核态访问)。
 ; repair: 这两种都补不了页(按需分页只对 P=0 有意义), 交给 handler 只会疯狂重试成

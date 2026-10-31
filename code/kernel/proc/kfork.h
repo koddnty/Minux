@@ -1,7 +1,7 @@
 #pragma once
-#include "kprintf.h"
+#include "syscall/kprintf.h"
 #include "minFs/fsTree.h"
-#include "kmemory.h"
+#include "memory/kmemory.h"
 
 #define USER_CODE_VADDR  0x400000       // 用户代码段
 #define USER_STACK_VADDR 0x800000       // 用户栈顶

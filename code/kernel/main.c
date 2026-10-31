@@ -1,11 +1,11 @@
 /* 内核 C 主体。
  * kernel_entry.asm 已经把 CS/DS/SS 拉平、栈切好、.bss 清零，然后 call 到这里。
  */
-#include "lib/kprintf.h"
+#include "syscall/kprintf.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "lib/kmemory.h"
-#include "lib/kfork.h"
+#include "memory/kmemory.h"
+#include "proc/kfork.h"
 
 
 

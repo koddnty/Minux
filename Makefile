@@ -64,7 +64,7 @@ KERNEL_FS_ASM := code/minFs/readSector.asm
 
 # 每个内核子目录都进 include 路径，代码里可以直接 #include "kprintf.h"
 # repair: 原来写的是 $(dir $(shell find … -type d))，而 $(dir) 是"取文件所在目录"的，
-# repair: 对目录用它会把最后一段吃掉（code/kernel/lib → code/kernel/），子目录其实没进搜索路径。
+# repair: 对目录用它会把最后一段吃掉（code/kernel/syscall → code/kernel/），子目录其实没进搜索路径。
 KERNEL_INC  := $(sort $(addsuffix /,$(shell find code/kernel -type d)))
 
 # 内核也要用的 libc 子集：实现在 code/tools，声明在 code/tools/string.h
@@ -119,9 +119,9 @@ $(BIN)/loader.bin: code/boot/loader.asm | $(BIN)
 #     2) 链接用内核自己的脚本 kernel.ld（决定加载地址 $(KERNEL_BASE) 和 __bss_* 符号）
 #     3) 最后 objcopy -O binary 出裸二进制，由 loader 直接读到内存里跑
 #
-#   目标文件按源码目录结构放到 bin/kernel/ 下（如 bin/kernel/lib/kprintf.c.o）
+#   目标文件按源码目录结构放到 bin/kernel/ 下（如 bin/kernel/syscall/kprintf.c.o）
 #
-#   子目录里的 .asm（如 lib/ksyscall.asm）由上面的 find 自动收进来，不用加规则；
+#   子目录里的 .asm（如 syscall/ksyscall.asm）由上面的 find 自动收进来，不用加规则；
 #   跨文件引用符号用 global / extern，选择子这类常量已经导成 ABS 符号。
 #   要共享宏或常量文件，放 code/kernel/*.inc 然后 %include 就行（-I 已经加好）。
 # ---------------------------------------------------------------------------

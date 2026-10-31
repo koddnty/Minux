@@ -4,7 +4,7 @@
  * 裸二进制, 偏移 0 就正好是入口 _start —— 这正是 miCoreProgramLoader 的假设:
  * 它把文件【原样】memcpy 到 0x400000, 然后 enter_user_mode(0x400000, ...)。
  *
- * 注意: 0x400000 必须和 code/kernel/lib/kfork.h 里的 USER_CODE_VADDR 保持一致,
+ * 注意: 0x400000 必须和 code/kernel/proc/kfork.h 里的 USER_CODE_VADDR 保持一致,
  *       改一处必须改另一处。
  */
 ENTRY(_start)
