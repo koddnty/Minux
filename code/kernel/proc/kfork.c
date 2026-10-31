@@ -1,8 +1,130 @@
 #include "kfork.h"
 
+#include "kernel/memory/kmemory.h"
+#include "kernel/memory/kmemory_internal.h"
 
 
 static char program_buffer[MI_CORE_PAGE_SIZE];
+static ProcessControlBlock process_pcb[MAX_PROCESS_COUNT]; // 进程数组，索引为pid
+static uint8_t process_used[MAX_PROCESS_COUNT];            // 该 pid 是否已被占用
+static pid_t curr_process = -1;                            // 当前进程pid
+
+
+// 创建一个空进程: 分配 PCB 和一张只带内核映射的页目录
+pid_t miCoreCreateProcess() {
+    for (pid_t pid = 0; pid < MAX_PROCESS_COUNT; pid++) {
+        if (process_used[pid]) {
+            continue;
+        }
+
+        phys_addr_type pd_phys = miCoreCreateTopPageDirectory();
+
+        if (pd_phys == 0) {
+            return -1;
+        }
+
+        addr_type pd_virt = miCoreGetPageDirectoryVirt(pd_phys);
+
+        if (pd_virt == 0) {
+            miCoreDestroyTopPageDirectory(pd_phys);
+            return -1;
+        }
+
+        ProcessControlBlock* pcb = &process_pcb[pid];
+
+        memset(pcb, 0, sizeof(*pcb));
+        pcb->pid = pid;
+        pcb->phys_page_directory = pd_phys;
+        pcb->page_directory = pd_virt;
+
+        process_used[pid] = 1;
+        return pid;
+    }
+
+    return -1;
+}
+
+
+// 切换到指定进程: 只切 CR3, 不处理调度和 TSS
+int miCoreSwitchProcess(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESS_COUNT || !process_used[pid]) {
+        return -1;
+    }
+
+    if (pid == curr_process) {
+        return 0;
+    }
+
+    miCoreLoadCR3(process_pcb[pid].phys_page_directory);
+    curr_process = pid;
+    return 0;
+}
+
+
+// 清理进程: 释放用户数据页、用户页表、页表和页目录槽位
+int miCoreCleanProcess(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESS_COUNT || !process_used[pid]) {
+        return -1;
+    }
+
+    // 当前正在用的页目录不能直接释放, 先切走
+    if (pid == curr_process) {
+        return -1;
+    }
+
+    ProcessControlBlock* pcb = &process_pcb[pid];
+    addr_type pd_virt = pcb->page_directory;
+
+    if (pd_virt == 0 || pcb->phys_page_directory == miCoreGetCR3()) {
+        return -1;
+    }
+
+    // 先检查每个用户 PDE 都有可访问的页表槽位, 避免清到一半失败
+    for (uint32_t pde = 256; pde < 1024; pde++) {
+        uint32_t pde_val = ((uint32_t*)pd_virt)[pde];
+
+        if ((pde_val & PAGE_PRESENT) &&
+            miCoreGetPageTableSlot(pd_virt, pde) == 0) {
+            return -1;
+        }
+    }
+
+    // 释放用户页表里的数据页, 再释放页表本身
+    for (uint32_t pde = 256; pde < 1024; pde++) {
+        uint32_t pde_val = ((uint32_t*)pd_virt)[pde];
+
+        if ((pde_val & PAGE_PRESENT) == 0) {
+            continue;
+        }
+
+        uint32_t pt_phys = pde_val & 0xFFFFF000;
+        size_t slot = miCoreGetPageTableSlot(pd_virt, pde);
+        uint32_t* page_table =
+            (uint32_t*)(PAGE_TABLE_WINDOW_BEGIN + slot * PAGE_SIZE);
+
+        for (size_t i = 0; i < 1024; i++) {
+            uint32_t pte = page_table[i];
+
+            if (pte & PAGE_PRESENT) {
+                miCoreMemoryFreePage(pte & 0xFFFFF000);
+                page_table[i] = 0;
+            }
+        }
+
+        miCoreReleasePageTableSlot(pd_virt, pde);
+        miCoreMemoryFreePage(pt_phys);
+        ((uint32_t*)pd_virt)[pde] = 0;
+    }
+
+    if (miCoreDestroyTopPageDirectory(pcb->phys_page_directory) != 0) {
+        return -1;
+    }
+
+    memset(pcb, 0, sizeof(*pcb));
+    process_used[pid] = 0;
+    return 0;
+}
+
 
 // 程序加载：读取裸二进制文件，将其连续映射到用户空间 0x400000 开始的位置。
 void miCoreProgramLoader(const char* path) {
@@ -109,6 +231,7 @@ void miCoreProgramLoader(const char* path) {
         USER_STACK_TOP
     );
 }
+
 
 
 

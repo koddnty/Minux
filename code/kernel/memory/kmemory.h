@@ -1,7 +1,12 @@
 #pragma once
 #include <stdint.h>
 #include <string.h>
+#include "kernel/base.h"
 
+/**
+ * koddnty
+ *  内存管理，实现页表构建，物理内存-虚拟地址映射，维护物理内存
+ */
 #define  MI_CORE_MEMORY_TOTAL_SIZE 32768
 #define  MI_CORE_INIT_MEMORY_SIZE 1024
 #define MI_CORE_PAGE_SIZE 4096
@@ -51,6 +56,10 @@ uint32_t miCoreMemoryAllocPage();
 // 释放物理内存页, 0成功， -1失败
 int miCoreMemoryFreePage(uint32_t addr);
 
+// 创建一张干净顶级页表，内核区域和当前页表一致,中途不允许中断(准备用作进程创建）,返回物理地址供cr3使用
+phys_addr_type miCoreCreateTopPageDirectory();
 
-// 虚拟内存管理 ----------------------------------------
+// 查询顶级页表在 900MB-1GB 专区里的虚拟别名, 0 表示不是本内核创建的页目录
+// 只映射一级页目录; 二级页表仍然在 miCorePageMap 里按需分配和映射
+addr_type miCoreGetPageDirectoryVirt(phys_addr_type pd_phys);
 

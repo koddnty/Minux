@@ -17,7 +17,6 @@ int kernel_main(void) {
     miCorePageArenaInit();  // 初始化页表专区(900MB 起)
     kVagprintf("success: init page table arena\n");
 
-
     // test
     miCoreProgramLoader("/test/hellominux");
     exit(0);
