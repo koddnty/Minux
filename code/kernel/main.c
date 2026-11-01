@@ -12,10 +12,24 @@
 int kernel_main(void) {
     kVagprintf("success: init gdt\n");
     kVagprintf("success: init tss\n");
-    miCoreMemoryInit();     // 初始化虚拟内存
-    kVagprintf("success: init virtual memory\n");
-    miCorePageArenaInit();  // 初始化页表专区(900MB 起)
+    miCoreMemoryInit();     // 初始化物理内存位图
+    kVagprintf("success: init physical memory\n");
+
+    // 初始化页表专区, 并把 0-1GB 的二级页表全部建好(900MB-1GB 窗口 + 0-900MB 内核页表)
+    if (miCorePageArenaInit() != 0) {
+        kVagprintf("failed: init page table arena\n");
+        while (1);
+    }
     kVagprintf("success: init page table arena\n");
+
+    // 先建一个进程并切过去, 之后的用户缺页才有当前进程的栈/堆范围可查
+    pid_t pid = miCoreCreateProcess();
+    if (pid < 0) {
+        kVagprintf("failed: create process\n");
+        while (1);
+    }
+    miCoreSwitchProcess(pid);
+    kVagprintf("start process: %d\n", pid);
 
     // test
     miCoreProgramLoader("/test/hellominux");

@@ -1,5 +1,7 @@
 #include "kmemory.h"
 
+#include "kernel/proc/kfork.h"
+
 
 
 
@@ -173,6 +175,42 @@ static void miArenaClearSlot(size_t slot) {
     miCoreInvalidatePage(PAGE_TABLE_WINDOW_BEGIN + slot * PAGE_SIZE);
 }
 
+// 启动后把 0-1GB 的二级页表全部建好, 并填满一级页表(页目录)的 0-255 项。
+// 这样以后内核堆/栈再建映射时, 所有进程页目录看到的都是同一组内核页表。
+static int miArenaPopulateKernel(uint32_t* page_directory) {
+    // PDE 0 用 loader 建好的 0-4MB 恒等映射表, 槽位 0 就是它
+    mi_core_table_slot[0][0] = 0;
+
+    // PDE 1-224: 普通二级页表, 先建空表
+    for (uint32_t pde = 1; pde < 225; pde++) {
+        size_t slot = miArenaAllocSlot();
+        uint32_t table = miCoreMemoryAllocPage();
+
+        if (slot == 0 || table == 0) {
+            return -1;
+        }
+
+        miArenaSetSlot(slot, table);
+        memset((void*)(PAGE_TABLE_WINDOW_BEGIN + slot * PAGE_SIZE), 0, PAGE_SIZE);
+
+        page_directory[pde] = table | PAGE_PRESENT | PAGE_WRITE;
+        mi_core_table_slot[0][pde] = (uint16_t)slot;
+    }
+
+    // PDE 225-255: 页表专区窗口, 把 30 个 block 表也提前长出来
+    for (size_t block = 1; block < MI_CORE_ARENA_BLOCK_COUNT; block++) {
+        miArenaEnsureBlock(block);
+
+        size_t pde = (PAGE_TABLE_WINDOW_BEGIN >> 22) + block;
+
+        if ((page_directory[pde] & PAGE_PRESENT) == 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 // 初始化页表专区: 槽位 0 指向 0~4MB 那张表(内容不动), 根表挂到 PDE
 int miCorePageArenaInit() {
     uint32_t* root = (uint32_t*)PAGE_TABLE_ADDR;             // 低内存, 可直接写
@@ -184,12 +222,36 @@ int miCorePageArenaInit() {
     root[0] = PAGE_TABLE_LOW_ADDR | PAGE_PRESENT | PAGE_WRITE;
     page_directory[PAGE_TABLE_WINDOW_BEGIN >> 22] = PAGE_TABLE_ADDR | PAGE_PRESENT | PAGE_WRITE;
     miCoreInvalidatePage(PAGE_TABLE_WINDOW_BEGIN);
-    return 0;
+
+    return miArenaPopulateKernel(page_directory);
 }
 
 void miCorePageFaultHandler(uint32_t fault_addr) {
     uint32_t virtual_addr =
         fault_addr & ~(MI_CORE_PAGE_SIZE - 1);
+
+    ProcessControlBlock* pcb = miCoreCurrentProcess();
+    int valid = 0;
+
+    if (pcb != 0) {
+        // 用户栈: 从高往低长, 栈底到栈顶之间都算合法
+        if (virtual_addr >= pcb->pmpa.begin_of_user_stack &&
+            virtual_addr < pcb->pmpa.end_of_user_stack) {
+            valid = 1;
+        }
+
+        // 用户堆: 当前堆范围内按需补页
+        if (virtual_addr >= pcb->pmpa.begin_of_user_heap &&
+            virtual_addr < pcb->pmpa.end_of_user_heap) {
+            valid = 1;
+        }
+    }
+
+    if (!valid) {
+        // 不在当前进程的用户栈/堆里, 不补页, 直接按 segfault 处理
+        miCoreHandleSegfault(fault_addr);
+        return;
+    }
 
     uint32_t physical_addr =
         miCoreMemoryAllocPage();

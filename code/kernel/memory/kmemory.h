@@ -21,6 +21,10 @@
 #define PAGE_SIZE               0x1000
 #define PAGE_TABLE_VIRTUAL_SIZE 0x400000
 
+// 内核堆默认范围: 0-1GB 内核区内, 低于 900MB 页表窗口
+#define BEGIN_OF_CORE_HEAP      0x01000000
+#define END_OF_CORE_HEAP        0x04000000
+
 // 页表项属性
 #define PAGE_PRESENT 0x001
 #define PAGE_WRITE   0x002

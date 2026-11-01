@@ -232,6 +232,15 @@ enter_user_mode:
     iretd
 
 
+; void miCoreSetTSSEsp0(uint32_t esp0)
+; 切进程时把 TSS.esp0 换成该进程自己的内核栈顶
+global miCoreSetTSSEsp0
+miCoreSetTSSEsp0:
+    mov eax, [esp + 4]
+    mov dword [tss + TSS32.esp0], eax
+    ret
+
+
 ; 用户态测试代码: 位置无关的一小段, 由 C 拷到用户页里执行
 ;   ring3 不能用 hlt(特权指令, 会 #GP), 所以用死循环阻塞
 global user_code_start

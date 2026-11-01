@@ -6,12 +6,12 @@
 #
 #  产物: test/bin/<名字>.bin
 #    这些 bin 由 host/test_build.c 装进 minux 的 /test/ 目录,
-#    内核再用 miCoreProgramLoader() 加载到 0x400000 跑起来。
+#    内核再用 miCoreProgramLoader() 加载到 0x40000000 跑起来。
 #
 #  为什么是裸二进制而不是 ELF?
-#    miCoreProgramLoader 把文件【原样】拷到 0x400000 然后跳过去执行, 它不解析 ELF 头。
+#    miCoreProgramLoader 把文件【原样】拷到 0x40000000 然后跳过去执行, 它不解析 ELF 头。
 #    所以必须交裸二进制, 并且入口 _start 要正好落在偏移 0 —— test.ld 里
-#    `. = 0x400000` 保证了这一点（objcopy -O binary 以最低 LMA 为文件起点）。
+#    `. = 0x40000000` 保证了这一点（objcopy -O binary 以最低 LMA 为文件起点）。
 #    直接 `ld -o prog` 出来的 ELF 是没法用的: 第 0 字节是 \x7fELF。
 #
 #  加一个新测试程序:
@@ -33,7 +33,7 @@ ROOT    := $(CURDIR)/..
 BIN     := bin
 
 # 用户程序链接地址, 必须和 code/kernel/proc/kfork.h 的 USER_CODE_VADDR 一致
-USER_BASE := 0x400000
+USER_BASE := 0x40000000
 
 # 用户侧运行时: write() 这类系统调用包装。它是【用户程序】的一部分,
 # 内核里那份编进去只是顺带（内核自己用 kVprintf），所以这里必须单独链进来,
@@ -82,12 +82,12 @@ check-entry: $(BINS)
 	@set -e; for b in $(BINS); do \
 	    e=$$(nm $(BIN)/$$(basename $$b .bin).elf | awk '/ T _start$$/ {print $$1}'); \
 	    if [ "$$((16#$$e))" != "$$((16#400000))" ]; then \
-	        echo "$$b: _start 在 0x$$e, 不是 0x400000 —— test.ld 的 . = 0x400000 被改过了?"; exit 1; \
+	        echo "$$b: _start 在 0x$$e, 不是 0x40000000 —— test.ld 的 . = 0x40000000 被改过了?"; exit 1; \
 	    fi; \
 	    if xxd -l 4 $$b | grep -q "7f45 4c46"; then \
 	        echo "$$b: 是 ELF 不是裸二进制, miCoreProgramLoader 跑不了它"; exit 1; \
 	    fi; \
-	    echo "  $$b: _start@0x400000, 裸二进制 OK"; \
+	    echo "  $$b: _start@0x40000000, 裸二进制 OK"; \
 	done
 
 # 看看某个程序里都有什么符号（排查入口没在偏移 0 很有用）

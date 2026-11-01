@@ -2,6 +2,7 @@
 
 #include "kernel/memory/kmemory.h"
 #include "kernel/memory/kmemory_internal.h"
+#include "kernel/memory/kalloc.h"
 
 
 static char program_buffer[MI_CORE_PAGE_SIZE];
@@ -37,6 +38,24 @@ pid_t miCoreCreateProcess() {
         pcb->phys_page_directory = pd_phys;
         pcb->page_directory = pd_virt;
 
+        // 每进程内核栈从内核堆拿一块, 16KB
+        void* kernel_stack = miCoreKernelAllocPage(CORE_STACK_SIZE);
+
+        if (kernel_stack == 0) {
+            miCoreDestroyTopPageDirectory(pd_phys);
+            return -1;
+        }
+
+        // 用户栈/堆的初始范围, 页表等真正访问时再按需建立
+        pcb->pmpa.begin_of_user_stack = BEGIN_OF_USER_STACK;
+        pcb->pmpa.end_of_user_stack = END_OF_USER_STACK;
+        pcb->pmpa.begin_of_user_heap = BEGIN_OF_USER_HEAP;
+        pcb->pmpa.end_of_user_heap =
+            BEGIN_OF_USER_HEAP + PROCESS_DEFAULT_HEAP_SIZE;
+        pcb->pmpa.end_of_core_stack = (addr_type)kernel_stack;
+        pcb->pmpa.begin_of_core_stack =
+            (addr_type)kernel_stack + CORE_STACK_SIZE;
+
         process_used[pid] = 1;
         return pid;
     }
@@ -45,7 +64,7 @@ pid_t miCoreCreateProcess() {
 }
 
 
-// 切换到指定进程: 只切 CR3, 不处理调度和 TSS
+// 切换到指定进程: 切 CR3, 同时把 TSS.esp0 换成该进程自己的内核栈顶
 int miCoreSwitchProcess(pid_t pid) {
     if (pid < 0 || pid >= MAX_PROCESS_COUNT || !process_used[pid]) {
         return -1;
@@ -55,6 +74,7 @@ int miCoreSwitchProcess(pid_t pid) {
         return 0;
     }
 
+    miCoreSetTSSEsp0(process_pcb[pid].pmpa.begin_of_core_stack);
     miCoreLoadCR3(process_pcb[pid].phys_page_directory);
     curr_process = pid;
     return 0;
@@ -120,9 +140,40 @@ int miCoreCleanProcess(pid_t pid) {
         return -1;
     }
 
+    // 内核栈还给内核堆
+    miCoreKernelFreePage((void*)pcb->pmpa.end_of_core_stack);
+
     memset(pcb, 0, sizeof(*pcb));
     process_used[pid] = 0;
     return 0;
+}
+
+
+// 当前进程 PCB, 缺页处理用它判断故障地址属于哪个用户段
+ProcessControlBlock* miCoreCurrentProcess(void) {
+    if (curr_process < 0 || curr_process >= MAX_PROCESS_COUNT ||
+        !process_used[curr_process]) {
+        return 0;
+    }
+
+    return &process_pcb[curr_process];
+}
+
+
+// 非法缺页: 不补页, 标记当前进程退出并停机
+void miCoreHandleSegfault(uint32_t addr) {
+    kVagprintf("segfault at 0x%x, pid=%d\n", addr, curr_process);
+
+    if (curr_process >= 0 && curr_process < MAX_PROCESS_COUNT) {
+        process_used[curr_process] = 0;
+    }
+
+    curr_process = -1;
+
+    // 还没有调度器可以切到别的进程, 先停机
+    for (;;) {
+        asm volatile("cli; hlt");
+    }
 }
 
 
