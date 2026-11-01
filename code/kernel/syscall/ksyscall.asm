@@ -1,9 +1,12 @@
 global syscall_entry
+global syscall_return
 
 ; 选择子在 kernel_entry.asm 里定义(GDT 是它的), 用 extern 引过来
 extern SelectorKernelData32
 extern kernel_write
-
+extern miCoreFork
+extern miCoreExec
+extern miCoreGetPid
 
 ;EBX = arg1
 ;ECX = arg2
@@ -66,20 +69,44 @@ kernel_write_entry:
 ; 系统调用表 ----------------------------------------
 [section .data]
 ; repair: 表项个数, syscall_entry 用它做越界检查(加新调用别忘了改这个数)
-SYSCALL_COUNT equ 2
+SYSCALL_COUNT equ 5
 
 syscall_table:
     dd syscall_exit
     dd kernel_write_entry
+    dd syscall_fork                         ; 进程创建
+    dd syscall_exec                         ; 加载并执行
+    dd syscall_get_pid                      ; 获取当前 pid
 
+
+; fork: 把当前 syscall 现场指针传给内核, 返回值写回保存的 EAX
+[section .text]
+syscall_fork:
+    push esp
+    call miCoreFork
+    add esp, 4
+    mov [esp + 28], eax
+    jmp syscall_return
+
+
+; exec: EBX 是用户传进来的路径指针
+syscall_exec:
+    push ebx
+    call miCoreExec
+    add esp, 4
+    mov [esp + 28], eax
+    jmp syscall_return
+
+
+; get_pid: 没有参数
+syscall_get_pid:
+    call miCoreGetPid
+    mov [esp + 28], eax
+    jmp syscall_return
 
 
 ; 其他 ----------------------------------------
 syscall_exit:
-    mov byte [0xB8000 + 160 * 12],     'O'
-    mov byte [0xB8000 + 160 * 12 + 1], 0x0A
-    mov byte [0xB8000 + 160 * 12 + 2], 'K'
-    mov byte [0xB8000 + 160 * 12 + 3], 0x0A
 .exit:
     cli
     hlt

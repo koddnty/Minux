@@ -38,7 +38,8 @@ USER_BASE := 0x40000000
 # 用户侧运行时: write() 这类系统调用包装。它是【用户程序】的一部分,
 # 内核里那份编进去只是顺带（内核自己用 kVprintf），所以这里必须单独链进来,
 # 否则 hellominux.c 里的 write() 会 undefined reference。
-USER_RUNTIME_SRC := $(ROOT)/code/kernel/syscall/syscall.c
+USER_RUNTIME_SRC := $(ROOT)/code/kernel/syscall/syscall.c \
+                    $(ROOT)/code/kernel/syscall/threads.c
 
 # 测试 C 代码: 没有 libc（内核只提供 code/tools/cstring.c 那几个函数）
 #   -I $(ROOT)/code 是为了让测试代码能 #include "kernel/syscall/syscall.h"
@@ -66,8 +67,11 @@ $(BIN)/%.bin: %.asm test.ld $(PROG_C) $(USER_RUNTIME_SRC) | $(BIN)
 	@set -e; \
 	$(NASM) -f elf32 $< -o $(BIN)/$*.asm.o; \
 	objs="$(BIN)/$*.asm.o"; \
-	$(CC) $(TCFLAGS) -c $(USER_RUNTIME_SRC) -o $(BIN)/$*.runtime.o; \
-	objs="$$objs $(BIN)/$*.runtime.o"; \
+	for src in $(USER_RUNTIME_SRC); do \
+	    obj="$(BIN)/$*.rt.$$(basename $$src .c).o"; \
+	    $(CC) $(TCFLAGS) -c $$src -o $$obj; \
+	    objs="$$objs $$obj"; \
+	done; \
 	if [ -f "$*.c" ]; then \
 	    $(CC) $(TCFLAGS) -c $*.c -o $(BIN)/$*.c.o; \
 	    objs="$$objs $(BIN)/$*.c.o"; \
@@ -81,7 +85,7 @@ $(BIN)/%.bin: %.asm test.ld $(PROG_C) $(USER_RUNTIME_SRC) | $(BIN)
 check-entry: $(BINS)
 	@set -e; for b in $(BINS); do \
 	    e=$$(nm $(BIN)/$$(basename $$b .bin).elf | awk '/ T _start$$/ {print $$1}'); \
-	    if [ "$$((16#$$e))" != "$$((16#400000))" ]; then \
+	    if [ "$$((16#$$e))" != "$$((16#40000000))" ]; then \
 	        echo "$$b: _start 在 0x$$e, 不是 0x40000000 —— test.ld 的 . = 0x40000000 被改过了?"; exit 1; \
 	    fi; \
 	    if xxd -l 4 $$b | grep -q "7f45 4c46"; then \

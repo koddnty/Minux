@@ -43,18 +43,37 @@ typedef struct ProcessControlBlock {
     ProcessMemoryPartition pmpa;      // 进程内存分区
     phys_addr_type phys_page_directory;           // 顶级页表指针（物理地址）
     addr_type page_directory;           // 顶级页表指针（虚拟地址）
+    addr_type kernel_esp;               // 切走时保存的内核栈 ESP, 0 表示还没有上下文
 } ProcessControlBlock;
 
 
-// 进程创建, 返回进程pid(与索引对应)
+extern void mi_core_switch_process_to(
+    uint32_t* current_context_esp,          // 当前esp
+    uint32_t next_context_esp,              // 下一个上下文esp
+    uint32_t next_page_directory            // 下一个页表
+);
+
+// 进程创建, 返回进程pid(与索引对应)，不切换
 pid_t miCoreCreateProcess();
 // 切换进程到 pid进程，不存在则返回-1
 int miCoreSwitchProcess(pid_t pid);
 // 清理进程数据（页表等）
 int miCoreCleanProcess(pid_t pid);
 
+// fork: 复制当前进程地址空间, 返回子进程 pid(父) / 0(子, 由子进程上下文恢复)
+pid_t miCoreFork(uint32_t* parent_frame);
+
+// 系统调用返回路径, 供子进程初始上下文 ret 进去
+extern void syscall_return(void);
+
 // 当前进程 PCB, 没有当前进程返回 0
 ProcessControlBlock* miCoreCurrentProcess(void);
+
+// 当前进程 pid, 没有当前进程返回 -1
+pid_t miCoreGetPid(void);
+
+// 加载并直接执行 path 指向的程序; 成功不返回, 失败返回 -1
+pid_t miCoreExec(const char* path);
 
 // 非法缺页: 打印 segfault, 标记当前进程退出并停机
 void miCoreHandleSegfault(uint32_t addr);
@@ -64,6 +83,10 @@ void miCoreHandleSegfault(uint32_t addr);
 
 // 程序加载（编译时把入口放在0位置，加载到USER_CODE_VADDR（用户态开始)位置
 void miCoreProgramLoader(const char* path);
+
+
+
+// 进程创建
 
 // 程序退出
 void exit(int status);

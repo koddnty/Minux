@@ -175,6 +175,34 @@ static void miArenaClearSlot(size_t slot) {
     miCoreInvalidatePage(PAGE_TABLE_WINDOW_BEGIN + slot * PAGE_SIZE);
 }
 
+// 临时映射一个物理页, 返回它在页表专区里的虚拟地址
+addr_type miCoreMapPageTemp(phys_addr_type pa) {
+    if (pa == 0) {
+        return 0;
+    }
+
+    size_t slot = miArenaAllocSlot();
+
+    if (slot == 0) {
+        return 0;
+    }
+
+    miArenaSetSlot(slot, pa);
+    return PAGE_TABLE_WINDOW_BEGIN + slot * PAGE_SIZE;
+}
+
+// 解除临时映射并归还槽位
+void miCoreUnmapPageTemp(addr_type va) {
+    if (va < PAGE_TABLE_WINDOW_BEGIN || va >= PAGE_TABLE_WINDOW_END) {
+        return;
+    }
+
+    size_t slot = (va - PAGE_TABLE_WINDOW_BEGIN) / PAGE_SIZE;
+
+    miArenaClearSlot(slot);
+    miArenaFreeSlot(slot);
+}
+
 // 启动后把 0-1GB 的二级页表全部建好, 并填满一级页表(页目录)的 0-255 项。
 // 这样以后内核堆/栈再建映射时, 所有进程页目录看到的都是同一组内核页表。
 static int miArenaPopulateKernel(uint32_t* page_directory) {

@@ -28,11 +28,15 @@ int kernel_main(void) {
         kVagprintf("failed: create process\n");
         while (1);
     }
-    miCoreSwitchProcess(pid);
     kVagprintf("start process: %d\n", pid);
 
-    // test
-    miCoreProgramLoader("/test/hellominux");
-    exit(0);
-    return 0;
+    // 切过去后不会返回: 新进程的 bootstrap 会加载用户程序并进入 ring3
+    if (miCoreSwitchProcess(pid) != 0) {
+        kVagprintf("failed: switch process\n");
+        while (1);
+    }
+
+    for (;;) {
+        asm volatile("cli; hlt");
+    }
 }
